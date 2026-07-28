@@ -6,16 +6,16 @@ import requests
 import secrets
 
 KEY_ROWS = [
-    list("1234567890"),
-    list("qwertyuiop"),
-    list("asdfghjkl") + ["DEL"],
-    ["SHIFT"] + list("zxcvbnm") + ["SPACE", "ENTER"],
+    list("1234567890") + ["DEL"],
+    list("qwertyuiop") + ["ENTER"],
+    list("asdfghjkl") + [";", "'"],
+    list("zxcvbnm") + [",", ".", "/", "SPACE"],
 ]
 
-# Every row above has exactly 10 columns (an ortholinear grid, not the usual
+# Every row above has exactly 11 columns (an ortholinear grid, not the usual
 # staggered QWERTY rows) so UP/DOWN keeps the cursor's column meaning
 # consistent instead of landing on a visually unrelated key.
-KEY_LABELS = {"SHIFT": "SHF", "SPACE": "SPC", "ENTER": "ENT"}
+KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
 
 BASETEN_URL = "https://inference.baseten.co/v1/chat/completions"
 MODEL = "zai-org/GLM-5.2-Fast"
@@ -61,7 +61,6 @@ KEY_BG = color.rgb(30, 40, 55)
 KEY_FG = color.white
 SELECTED_BG = color.white
 SELECTED_FG = color.black
-SHIFT_ON_BG = color.yellow
 YOU_COLOR = color.white
 BOT_COLOR = color.lime
 ERROR_COLOR = color.red
@@ -84,7 +83,6 @@ log_lines = []
 buffer = ""
 cursor_row = 1
 cursor_col = 0
-shift_active = False
 status_text = None
 log_scroll = 0  # lines scrolled back from the bottom (0 = latest)
 
@@ -314,19 +312,16 @@ def send_message():
 
 
 def activate_key():
-    global buffer, shift_active
+    global buffer
     key = KEY_ROWS[cursor_row][cursor_col]
-    if key == "SHIFT":
-        shift_active = not shift_active
-    elif key == "SPACE":
+    if key == "SPACE":
         buffer += " "
     elif key == "DEL":
         buffer = buffer[:-1]
     elif key == "ENTER":
         send_message()
     else:
-        buffer += key.upper() if shift_active else key
-        shift_active = False
+        buffer += key
 
 
 def draw_log():
@@ -367,17 +362,12 @@ def draw_keyboard():
             x = x0 + col_idx * w
             selected = row_idx == cursor_row and col_idx == cursor_col
 
-            if selected:
-                bg, fg = SELECTED_BG, SELECTED_FG
-            elif key == "SHIFT" and shift_active:
-                bg, fg = SHIFT_ON_BG, SELECTED_FG
-            else:
-                bg, fg = KEY_BG, KEY_FG
+            bg, fg = (SELECTED_BG, SELECTED_FG) if selected else (KEY_BG, KEY_FG)
 
             screen.pen = bg
             screen.rectangle(x + KEY_PAD, y + KEY_PAD, w - KEY_PAD * 2, ROW_HEIGHT - KEY_PAD * 2)
             screen.pen = fg
-            label = KEY_LABELS.get(key, key) if len(key) > 1 else (key.upper() if shift_active else key)
+            label = KEY_LABELS.get(key, key)
             label_w, label_h = screen.measure_text(label)
             screen.text(label, x + (w - label_w) // 2, y + (ROW_HEIGHT - label_h) // 2)
 
