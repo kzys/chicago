@@ -21,7 +21,7 @@ def utc_now():
 
 def draw_profile():
     lines = [
-        ("Kazuyoshi Kato", rom_font.futile, color.white),
+        ("Kazuyoshi Kato", rom_font.ignore, color.white),
         ("(he/him)", rom_font.nope, color.smoke),
         ("", rom_font.nope, color.smoke),
         ("Infrastructure / Runtime Fabric", rom_font.nope, color.smoke),
