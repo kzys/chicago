@@ -9,6 +9,6 @@
 #
 # Blank lines and lines starting with # are ignored.
 
-baseten_status
 chat
+baseten_status
 hello_world
