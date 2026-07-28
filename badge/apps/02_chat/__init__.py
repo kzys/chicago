@@ -182,6 +182,12 @@ def add_log(text, pen):
 
 REQUEST_TIMEOUT = 45  # without this, a stalled connection hangs forever with no way to recover
 
+SYSTEM_PROMPT = (
+    "You are a helpful assistant running on a tiny badge with a small pixel "
+    "screen. Keep replies short - a sentence or two, no long code blocks or "
+    "lists unless specifically asked."
+)
+
 
 def call_model():
     r = requests.post(
@@ -192,7 +198,7 @@ def call_model():
         },
         json={
             "model": MODEL,
-            "messages": chat_history,
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + chat_history,
             "tools": TOOLS,
             "max_tokens": MAX_TOKENS,
             "temperature": 1,
@@ -205,7 +211,7 @@ def call_model():
         raise RuntimeError("HTTP " + str(r.status_code) + ": " + body[:80])
     data = r.json()
     r.close()
-    return data["choices"][0]["message"]
+    return data["choices"][0]  # message + finish_reason
 
 
 CALL_ATTEMPTS = 3  # this badge's wifi/TLS stack occasionally drops or mangles a request
@@ -268,12 +274,15 @@ def send_message():
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             set_status("...")
-            message = call_model_with_retry()
+            choice = call_model_with_retry()
+            message = choice["message"]
             tool_calls = message.get("tool_calls")
             if not tool_calls:
                 # Kimi-K3 can burn the whole token budget on reasoning_content
                 # and leave content null if it never got to a final answer.
                 reply = to_ascii((message.get("content") or message.get("reasoning_content") or "").strip())
+                if reply and choice.get("finish_reason") == "length":
+                    reply += " [cut off]"
                 reply = reply or "(no reply - response cut off, try a shorter question)"
                 break
 
