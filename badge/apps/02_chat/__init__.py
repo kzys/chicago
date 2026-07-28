@@ -53,7 +53,7 @@ TOOLS = [
 ]
 
 MARGIN = 4
-LOG_LINE_HEIGHT = 10  # 8px glyph height + 2px line spacing
+LOG_LINE_HEIGHT = 13  # 8px glyph height + 5px line spacing
 ROW_HEIGHT = 14
 KEY_PAD = 2
 
