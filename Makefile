@@ -1,9 +1,9 @@
 export DEVICE ?= /dev/ttyACM0
 
-.PHONY: install-hello-world
-install-hello-world:
-	badge/scripts/install-app.sh hello_world
+.PHONY: install-%
+install-%:
+	badge/scripts/install-app.sh $*
 
-.PHONY: uninstall-hello-world
-uninstall-hello-world:
-	badge/scripts/uninstall-app.sh hello_world
+.PHONY: uninstall-%
+uninstall-%:
+	badge/scripts/uninstall-app.sh $*
