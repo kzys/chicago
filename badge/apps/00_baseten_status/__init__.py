@@ -17,11 +17,6 @@ STATUS_COLORS = {
     "under_maintenance": color.blue,
 }
 
-# Statuspage incident impact levels, worst to best, mapped to a severity rank
-# used to pick the loudest color for a history bucket that had more than one.
-IMPACT_RANK = {"critical": 3, "major": 2, "minor": 1, "none": 0}
-IMPACT_COLORS = {3: color.red, 2: color.red, 1: color.yellow}
-
 # The public Statuspage API has no daily-uptime endpoint (that data is only
 # server-rendered into the status page's HTML), so instead of scraping we
 # bucket the last 90 days of *incidents* ourselves from /api/v2/incidents.json,
@@ -32,6 +27,40 @@ DAY_WIDTH = 3
 DAY_BAR_WIDTH = 2
 MARGIN = 4
 ROW_HEIGHT = 31
+
+# Statuspage documents this exact algorithm at
+# support.atlassian.com/statuspage/docs/display-historical-uptime-of-components:
+# only major_outage/partial_outage minutes count (degraded_performance and
+# under_maintenance are explicitly excluded), partial outages are discounted
+# to 30% as bad as major ones, and the color follows fixed minute thresholds
+# rather than a simple scaled gradient: any downtime at all immediately jumps
+# to halfway between green and yellow, then eases to fully yellow by 20min,
+# fully orange by 40min, fully red by 60min, and stays red past that.
+# hue/sat/val matched from the real site's clean-day fill (#00b86b)
+HUE_GREEN = 110
+HUE_YELLOW = 42
+HUE_ORANGE = 21
+HUE_RED = 0
+HUE_HALFWAY = (HUE_GREEN + HUE_YELLOW) // 2
+
+CLEAN_COLOR = color.hsv(HUE_GREEN, 255, 184)
+
+PARTIAL_OUTAGE_WEIGHT = 0.3
+
+
+def _downtime_color(minutes):
+    if minutes <= 0:
+        return CLEAN_COLOR
+    if minutes <= 20:
+        hue = HUE_HALFWAY + (HUE_YELLOW - HUE_HALFWAY) * (minutes / 20)
+    elif minutes <= 40:
+        hue = HUE_YELLOW + (HUE_ORANGE - HUE_YELLOW) * ((minutes - 20) / 20)
+    elif minutes <= 60:
+        hue = HUE_ORANGE + (HUE_RED - HUE_ORANGE) * ((minutes - 40) / 20)
+    else:
+        hue = HUE_RED
+    return color.hsv(int(hue), 220, 200)
+
 
 SPINNER = "-/|\\"
 SPINNER_FRAME_MS = 150
@@ -61,6 +90,36 @@ def _days_ago(iso_date, today_ordinal):
     return today_ordinal - _ordinal(y, m, d)
 
 
+def _total_minutes(iso_datetime):
+    # Same simplification as _days_ago: the UTC offset is ignored, which is
+    # fine here since a single incident's started_at/resolved_at/updated_at
+    # timestamps all carry the same offset, so it cancels out of the
+    # subtraction used to compute duration.
+    y, m, d = int(iso_datetime[0:4]), int(iso_datetime[5:7]), int(iso_datetime[8:10])
+    hh, mm = int(iso_datetime[11:13]), int(iso_datetime[14:16])
+    return _ordinal(y, m, d) * 1440 + hh * 60 + mm
+
+
+def _union_minutes(intervals):
+    # Separate incident reports for the same component can overlap in time
+    # (e.g. a second report filed before the first is resolved) — summing
+    # each incident's duration independently double-counts that overlap, so
+    # the actual affected time is the union of the intervals, not their sum.
+    if not intervals:
+        return 0
+    intervals.sort()
+    total = 0
+    start, end = intervals[0]
+    for s, e in intervals[1:]:
+        if s <= end:
+            end = max(end, e)
+        else:
+            total += end - start
+            start, end = s, e
+    total += end - start
+    return total
+
+
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
@@ -70,7 +129,9 @@ overall_ok = True
 status_last_fetch = None
 status_error = None
 
-# component id -> list[HISTORY_DAYS] of severity rank, index 0 = most recent day
+# component id -> list[HISTORY_DAYS] of color, index 0 = most recent day.
+# Colors are precomputed once per fetch rather than at draw time, since
+# draw_row() runs this over 90 days x every component, every frame.
 history = {}
 incidents_last_fetch = None
 incidents_error = None
@@ -108,23 +169,58 @@ def fetch_history():
         r = requests.get(INCIDENTS_URL)
         j = r.json()
 
-        buckets = {}
+        # major_outage beats partial_outage as the "worst state reached" for a
+        # given component during a single incident — the whole incident span
+        # is then attributed to whichever of the two it is (there's no
+        # per-update timestamp granularity fine enough to split a single
+        # incident's duration between the two states it passed through).
+        OUTAGE_RANK = {"major_outage": 2, "partial_outage": 1}
+
+        major_by_component = {}
+        partial_by_component = {}
         for incident in j["incidents"]:
             days_ago = _days_ago(incident["started_at"], today_ordinal)
             if days_ago < 0 or days_ago >= HISTORY_DAYS:
                 continue
-            rank = IMPACT_RANK.get(incident["impact"], 0)
 
-            seen_components = set()
+            start_min = _total_minutes(incident["started_at"])
+            end_at = incident["resolved_at"] or incident["updated_at"]
+            end_min = _total_minutes(end_at)
+            if end_min < start_min:
+                end_min = start_min
+
+            worst = {}
             for update_entry in incident["incident_updates"]:
                 for affected in update_entry["affected_components"]:
-                    seen_components.add(affected["code"])
+                    cid = affected["code"]
+                    rank = OUTAGE_RANK.get(affected["new_status"], 0)
+                    if rank > worst.get(cid, 0):
+                        worst[cid] = rank
 
-            for component_id in seen_components:
-                slots = buckets.setdefault(component_id, [0] * HISTORY_DAYS)
-                slots[days_ago] = max(slots[days_ago], rank)
+            for component_id, rank in worst.items():
+                if rank == 2:
+                    target = major_by_component
+                elif rank == 1:
+                    target = partial_by_component
+                else:
+                    continue
+                days = target.setdefault(component_id, [None] * HISTORY_DAYS)
+                if days[days_ago] is None:
+                    days[days_ago] = []
+                days[days_ago].append((start_min, end_min))
 
-        history = buckets
+        all_components = set(major_by_component) | set(partial_by_component)
+        history = {}
+        for component_id in all_components:
+            major_days = major_by_component.get(component_id, [None] * HISTORY_DAYS)
+            partial_days = partial_by_component.get(component_id, [None] * HISTORY_DAYS)
+            colors = []
+            for day in range(HISTORY_DAYS):
+                major_minutes = _union_minutes(major_days[day]) if major_days[day] else 0
+                partial_minutes = _union_minutes(partial_days[day]) if partial_days[day] else 0
+                total = major_minutes + partial_minutes * PARTIAL_OUTAGE_WEIGHT
+                colors.append(_downtime_color(total))
+            history[component_id] = colors
         incidents_error = None
     except (OSError, ValueError, KeyError) as e:
         incidents_error = str(e)
@@ -137,8 +233,7 @@ def draw_row(y, component_id, name, status):
     slots = history.get(component_id)
     bar_y = y + 15
     for i in range(HISTORY_DAYS):
-        rank = slots[HISTORY_DAYS - 1 - i] if slots else 0
-        screen.pen = IMPACT_COLORS.get(rank, color.green)
+        screen.pen = slots[HISTORY_DAYS - 1 - i] if slots else CLEAN_COLOR
         screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
@@ -151,7 +246,7 @@ def draw_log():
     # firmware) clears the framebuffer as a side effect of flushing it, so
     # log lines are redrawn from scratch every time rather than assumed to
     # persist across flushes.
-    screen.pen = color.black
+    screen.pen = color.white
     screen.clear()
     y = MARGIN
     for text, pen in log_lines:
@@ -165,9 +260,9 @@ def update():
 
     if not wifi.connect():
         wifi.tick()
-        screen.pen = color.black
-        screen.clear()
         screen.pen = color.white
+        screen.clear()
+        screen.pen = color.black
         spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
         screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
         return
@@ -180,7 +275,7 @@ def update():
     booting = overall is None
     if booting:
         log_lines.clear()
-        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.white))
+        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.black))
         draw_log()
 
     if status_last_fetch is None or (badge.ticks - status_last_fetch) / 1000 > STATUS_REFRESH_SECONDS:
@@ -209,17 +304,17 @@ def update():
         # first status fetch failed; stay on the boot log until the next retry
         return
 
-    screen.pen = color.black
+    screen.pen = color.white
     screen.clear()
 
-    screen.pen = color.white
+    screen.pen = color.black
     screen.text("Baseten Status", MARGIN, MARGIN)
 
     if overall is not None:
         screen.pen = color.green if overall_ok else color.orange
         screen.text(overall, MARGIN, MARGIN + 16)
     else:
-        screen.pen = color.white
+        screen.pen = color.black
         screen.text("Loading...", MARGIN, MARGIN + 16)
 
     if status_error or incidents_error:
