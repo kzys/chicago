@@ -19,7 +19,7 @@ KEY_LABELS = {"SHIFT": "SHF", "SPACE": "SPC", "ENTER": "ENT"}
 
 BASETEN_URL = "https://inference.baseten.co/v1/chat/completions"
 MODEL = "zai-org/GLM-5.2-Fast"
-MAX_TOKENS = 1024
+MAX_TOKENS = 300
 MAX_HISTORY = 20  # messages of context kept, oldest dropped first
 LOG_BUFFER_MAX = 200  # wrapped display lines kept, oldest dropped first
 MAX_TOOL_ROUNDS = 3  # follow-up requests allowed per message before giving up
@@ -53,7 +53,7 @@ TOOLS = [
 ]
 
 MARGIN = 4
-LOG_LINE_HEIGHT = 9
+LOG_LINE_HEIGHT = 10  # 8px glyph height + 2px line spacing
 ROW_HEIGHT = 14
 KEY_PAD = 2
 
@@ -259,7 +259,7 @@ def send_message():
         return
     buffer = ""
 
-    add_log("You: " + text, YOU_COLOR)
+    add_log(text, YOU_COLOR)
     chat_history.append({"role": "user", "content": text})
     del chat_history[:-MAX_HISTORY]
 
@@ -298,7 +298,7 @@ def send_message():
         reply_color = ERROR_COLOR
 
     status_text = None
-    add_log("Bot: " + reply, reply_color)
+    add_log(reply, reply_color)
     if reply_color is BOT_COLOR:
         chat_history.append({"role": "assistant", "content": reply})
         del chat_history[:-MAX_HISTORY]
