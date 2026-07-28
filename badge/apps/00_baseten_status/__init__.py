@@ -19,7 +19,7 @@ STATUS_COLORS = {
 # Statuspage incident impact levels, worst to best, mapped to a severity rank
 # used to pick the loudest color for a history bucket that had more than one.
 IMPACT_RANK = {"critical": 3, "major": 2, "minor": 1, "none": 0}
-IMPACT_COLORS = {3: color.red, 2: color.orange, 1: color.yellow, 0: color.grey}
+IMPACT_COLORS = {3: color.red, 2: color.red, 1: color.yellow}
 
 # The public Statuspage API has no daily-uptime endpoint (that data is only
 # server-rendered into the status page's HTML), so instead of scraping we
@@ -27,6 +27,10 @@ IMPACT_COLORS = {3: color.red, 2: color.orange, 1: color.yellow, 0: color.grey}
 # which is a normal documented, unauthenticated endpoint. One bucket per day,
 # rendered at one pixel per day.
 HISTORY_DAYS = 90
+DAY_WIDTH = 3
+DAY_BAR_WIDTH = 2
+MARGIN = 4
+ROW_HEIGHT = 31
 
 _CUM_DAYS = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
 
@@ -124,15 +128,14 @@ def fetch_history():
 
 def draw_row(y, component_id, name, status):
     screen.pen = STATUS_COLORS.get(status, color.grey)
-    screen.rectangle(16, y, 20, 16)
-    screen.pen = color.white
-    screen.text(name, 46, y + 3)
+    screen.text(name, MARGIN, y)
 
     slots = history.get(component_id)
+    bar_y = y + 15
     for i in range(HISTORY_DAYS):
         rank = slots[HISTORY_DAYS - 1 - i] if slots else 0
-        screen.pen = IMPACT_COLORS[rank] if rank else color.navy
-        screen.rectangle(214 + i, y + 2, 1, 12)
+        screen.pen = IMPACT_COLORS.get(rank, color.green)
+        screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
 def update():
@@ -144,7 +147,7 @@ def update():
     if not wifi.connect():
         wifi.tick()
         screen.pen = color.white
-        screen.text("Connecting to WiFi...", 16, 16)
+        screen.text("Connecting to WiFi...", MARGIN, MARGIN)
         return
 
     if status_last_fetch is None or (badge.ticks - status_last_fetch) / 1000 > STATUS_REFRESH_SECONDS:
@@ -156,23 +159,23 @@ def update():
         incidents_last_fetch = badge.ticks
 
     screen.pen = color.white
-    screen.text("Baseten Status", 16, 12)
+    screen.text("Baseten Status", MARGIN, MARGIN)
 
     if overall is not None:
         screen.pen = color.green if overall_ok else color.orange
-        screen.text(overall, 16, 34)
+        screen.text(overall, MARGIN, MARGIN + 16)
     else:
         screen.pen = color.white
-        screen.text("Loading...", 16, 34)
+        screen.text("Loading...", MARGIN, MARGIN + 16)
 
     if status_error or incidents_error:
         screen.pen = color.red
-        screen.text("Update failed, showing last known", 16, 52)
+        screen.text("Update failed, showing last known", MARGIN, MARGIN + 32)
 
-    y = 68
+    y = MARGIN + 44
     for component_id, name, status in components:
         draw_row(y, component_id, name, status)
-        y += 26
+        y += ROW_HEIGHT
 
 
 run(update)
