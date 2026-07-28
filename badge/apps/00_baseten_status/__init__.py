@@ -54,7 +54,7 @@ def _days_ago(iso_date, today_ordinal):
 
 
 badge.mode(HIRES)
-screen.font = rom_font.smart
+screen.font = rom_font.nope
 
 components = []
 overall = None
