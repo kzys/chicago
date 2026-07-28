@@ -18,13 +18,14 @@ KEY_ROWS = [
 KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
 
 BASETEN_URL = "https://inference.baseten.co/v1/chat/completions"
+MODELS_URL = "https://inference.baseten.co/v1/models"
 MODEL = "zai-org/GLM-5.2-Fast"
 MAX_TOKENS = 300
 MAX_HISTORY = 20  # messages of context kept, oldest dropped first
 LOG_BUFFER_MAX = 200  # wrapped display lines kept, oldest dropped first
 MAX_TOOL_ROUNDS = 3  # follow-up requests allowed per message before giving up
 
-TOOLS = [
+STATIC_TOOLS = [
     {
         "type": "function",
         "function": {
@@ -52,6 +53,28 @@ TOOLS = [
     },
 ]
 
+
+def build_tools():
+    # available_models is fetched once after wifi connects (see fetch_available_models),
+    # so the switch_model schema is only built with a real enum once that's known -
+    # before that it just accepts any string, best-effort.
+    switch_model_tool = {
+        "type": "function",
+        "function": {
+            "name": "switch_model",
+            "description": "Switch the underlying LLM used for future replies.",
+            "parameters": {
+                "type": "object",
+                "properties": {"model": {"type": "string", "description": "Model id to switch to"}},
+                "required": ["model"],
+            },
+        },
+    }
+    if available_models:
+        switch_model_tool["function"]["parameters"]["properties"]["model"]["enum"] = available_models
+    return STATIC_TOOLS + [switch_model_tool]
+
+
 MARGIN = 4
 LOG_LINE_HEIGHT = 13  # 8px glyph height + 5px line spacing
 ROW_HEIGHT = 14
@@ -73,7 +96,8 @@ screen.font = rom_font.nope
 
 KEYBOARD_TOP = screen.height - MARGIN - len(KEY_ROWS) * ROW_HEIGHT
 COMPOSER_Y = KEYBOARD_TOP - MARGIN - LOG_LINE_HEIGHT
-LOG_TOP = MARGIN
+HEADER_Y = MARGIN
+LOG_TOP = HEADER_Y + LOG_LINE_HEIGHT + MARGIN
 LOG_BOTTOM = COMPOSER_Y - MARGIN
 LOG_MAX_WIDTH = screen.width - 2 * MARGIN
 LOG_VISIBLE_LINES = max(1, (LOG_BOTTOM - LOG_TOP) // LOG_LINE_HEIGHT)
@@ -85,6 +109,8 @@ cursor_row = 1
 cursor_col = 0
 status_text = None
 log_scroll = 0  # lines scrolled back from the bottom (0 = latest)
+available_models = []  # populated once by fetch_available_models(), after wifi connects
+models_loaded = False  # tried once, whether or not it succeeded
 
 
 def tool_get_battery_level(args):
@@ -97,10 +123,38 @@ def tool_set_caselights(args):
     return {"ok": True, "level": level}
 
 
+def tool_switch_model(args):
+    global MODEL
+    requested = args.get("model", "")
+    if not requested:
+        return {"error": "no model specified"}
+    if available_models and requested not in available_models:
+        return {"error": "unknown model", "available": available_models}
+    MODEL = requested
+    return {"ok": True, "model": MODEL}
+
+
 TOOL_FUNCTIONS = {
     "get_battery_level": tool_get_battery_level,
     "set_caselights": tool_set_caselights,
+    "switch_model": tool_switch_model,
 }
+
+
+def fetch_available_models():
+    global available_models, models_loaded
+    models_loaded = True
+    try:
+        r = requests.get(
+            MODELS_URL,
+            headers={"Authorization": "Api-Key " + secrets.BASETEN_API_KEY},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if r.status_code == 200:
+            available_models = [m["id"] for m in r.json().get("data", [])]
+        r.close()
+    except (OSError, ValueError):
+        pass  # not fatal - switch_model just won't have an enum to constrain choices to
 
 
 def key_width(row_idx):
@@ -183,7 +237,8 @@ REQUEST_TIMEOUT = 45  # without this, a stalled connection hangs forever with no
 SYSTEM_PROMPT = (
     "You are a helpful assistant running on a tiny badge with a small pixel "
     "screen. Keep replies short - a sentence or two, no long code blocks or "
-    "lists unless specifically asked."
+    "lists unless specifically asked. If asked to switch to a different "
+    "model, use the switch_model tool - its schema lists what's available."
 )
 
 
@@ -197,7 +252,7 @@ def call_model():
         json={
             "model": MODEL,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + chat_history,
-            "tools": TOOLS,
+            "tools": build_tools(),
             "max_tokens": MAX_TOKENS,
             "temperature": 1,
         },
@@ -347,6 +402,11 @@ def draw_log():
         y += LOG_LINE_HEIGHT
 
 
+def draw_header():
+    screen.pen = color.grey
+    screen.text(MODEL, MARGIN, HEADER_Y)
+
+
 def draw_composer():
     screen.pen = color.white
     cursor_char = "_" if (badge.ticks // 400) % 2 == 0 else " "
@@ -375,6 +435,7 @@ def draw_keyboard():
 def render():
     screen.pen = color.black
     screen.clear()
+    draw_header()
     draw_log()
     draw_composer()
     draw_keyboard()
@@ -389,6 +450,13 @@ def update():
         render()
         return
     status_text = None  # clear the "connecting..." message left over from just before this
+
+    if not models_loaded:
+        status_text = "listing models..."
+        render()
+        badge.update()
+        fetch_available_models()
+        status_text = None
 
     if badge.pressed(BUTTON_UP):
         handle_up()
