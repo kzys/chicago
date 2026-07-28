@@ -1,0 +1,14 @@
+# Menu order for the badge's app list, one app name per line.
+#
+# The Badgeware menu has no ordering concept of its own — it just lists
+# /system/apps entries alphabetically. To get a stable order, the install
+# scripts prefix each app's on-device directory name with its 1-based index
+# here (e.g. "chat" -> "02_chat"). Local directories under badge/apps/ stay
+# unprefixed so reordering apps is a one-line change here instead of a
+# directory rename that muddies git history.
+#
+# Blank lines and lines starting with # are ignored.
+
+baseten_status
+chat
+hello_world

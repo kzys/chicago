@@ -9,12 +9,12 @@ Apps for a Pimoroni Tufty 2350 badge (Badgeware firmware, MicroPython). Each app
 ## Commands
 
 ```
-make install-<app_name>      # e.g. make install-02_chat - copies badge/apps/<app_name> to the device and resets it
+make install-<app_name>      # e.g. make install-chat - copies badge/apps/<app_name> to the device and resets it
 make uninstall-<app_name>    # removes it from the device
 make install-secrets FILE=path/to/secrets.py   # copies a local secrets.py onto the device
 ```
 
-`DEVICE` defaults to `/dev/ttyACM0` and can be overridden: `make install-02_chat DEVICE=/dev/ttyACM1`.
+`DEVICE` defaults to `/dev/ttyACM0` and can be overridden: `make install-chat DEVICE=/dev/ttyACM1`.
 
 Before installing, catch syntax errors early (MicroPython tracebacks on-device are painful to debug otherwise):
 
@@ -28,6 +28,7 @@ There is no linter, formatter, or test suite configured in this project — don'
 
 - Install/uninstall work by launching the badge's own `mass_storage` app to expose its filesystem as a USB drive (`badge/scripts/_msc_common.sh`), copying files, unmounting, then running `mpremote ... reset` — **this reboots the whole badge**, killing whatever app was running.
 - Because of that reset, **installing an app does not hot-reload a currently-running instance**. After `make install-X`, you must relaunch the app from the on-device menu (or via `launch()`, see below) to actually run the new code — otherwise you're testing stale behavior.
+- The badge's menu has no concept of app order — it just lists `/system/apps` entries alphabetically. `badge/apps/order.txt` is the source of truth for menu order; install/uninstall (`badge/scripts/_order_common.sh`) prefix the on-device directory with that 1-based index (e.g. local `badge/apps/chat/` becomes `/system/apps/02_chat` if it's second in `order.txt`). Local directory names under `badge/apps/` stay unprefixed on purpose, so reordering apps is a one-line edit to `order.txt` instead of a directory rename that muddies git history. A new app must be added to `order.txt` or `make install-<app_name>` fails.
 - `secrets.py` (WiFi credentials, API keys) is never stored in this repo. It only exists on the device, written via `make install-secrets`. Treat it as a live secret file when reconstructing it locally for updates — read the current one off the device (`mpremote fs cat /system/secrets.py`) rather than guessing its contents.
 
 ## Badgeware app architecture
@@ -51,7 +52,7 @@ Since there's no emulator, driving an app's logic programmatically (for automate
 
 ```python
 import os
-os.chdir("/system/apps/<app_name>")
+os.chdir("/system/apps/<numbered_app_name>")  # on-device name, e.g. 02_chat — see order.txt, not badge/apps/<app_name>
 src = open("__init__.py").read()
 src = src.replace("run(update)", "")   # strip the blocking call at the end
 exec(src, globals())
