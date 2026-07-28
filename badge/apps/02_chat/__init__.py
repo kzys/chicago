@@ -278,7 +278,7 @@ def call_model_with_retry():
         except (OSError, ValueError, RuntimeError) as e:
             last_error = e
             if attempt < CALL_ATTEMPTS - 1:
-                set_status("retrying...")
+                set_status("Retrying...")
                 time.sleep(1)
     raise last_error
 
@@ -301,7 +301,7 @@ def set_status(text):
 
 def run_tool_call(call):
     name = call["function"]["name"]
-    set_status("using: " + name)
+    set_status("Using: " + name)
     fn = TOOL_FUNCTIONS.get(name)
     try:
         args = json.loads(call["function"].get("arguments") or "{}")
@@ -336,7 +336,7 @@ def send_message():
                 reply = to_ascii((message.get("content") or message.get("reasoning_content") or "").strip())
                 if reply and choice.get("finish_reason") == "length":
                     reply += " [cut off]"
-                reply = reply or "(no reply - response cut off, try a shorter question)"
+                reply = reply or "(No reply - response cut off, try a shorter question)"
                 break
 
             # Only keep the fields needed to replay tool calls - reasoning_content
@@ -353,10 +353,10 @@ def send_message():
             for call in tool_calls:
                 run_tool_call(call)
         if reply is None:
-            reply = "(too many tool calls, giving up)"
+            reply = "(Too many tool calls, giving up)"
             reply_color = ERROR_COLOR
     except (OSError, ValueError, KeyError, IndexError, RuntimeError) as e:
-        reply = "error: " + str(e)
+        reply = "Error: " + str(e)
         reply_color = ERROR_COLOR
 
     status_text = None
@@ -446,13 +446,13 @@ def update():
     if not wifi.connect():
         wifi.tick()
         spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
-        status_text = f"connecting to {secrets.WIFI_SSID} {spinner}"
+        status_text = f"Connecting to {secrets.WIFI_SSID} {spinner}"
         render()
         return
     status_text = None  # clear the "connecting..." message left over from just before this
 
     if not models_loaded:
-        status_text = "listing models..."
+        status_text = "Listing models..."
         render()
         badge.update()
         fetch_available_models()
