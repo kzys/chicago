@@ -2,12 +2,12 @@ export DEVICE ?= /dev/ttyACM0
 
 .PHONY: install-secrets
 install-secrets:
-	badge/scripts/install-secrets.sh $(FILE)
+	python3 scripts/install_secrets.py $(FILE)
 
 .PHONY: install-%
 install-%:
-	badge/scripts/install-app.sh $*
+	python3 scripts/install_app.py $*
 
 .PHONY: uninstall-%
 uninstall-%:
-	badge/scripts/uninstall-app.sh $*
+	python3 scripts/uninstall_app.py $*
