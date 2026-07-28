@@ -86,6 +86,7 @@ cursor_row = 1
 cursor_col = 0
 shift_active = False
 status_text = None
+log_scroll = 0  # lines scrolled back from the bottom (0 = latest)
 
 
 def tool_get_battery_level(args):
@@ -126,6 +127,25 @@ def move_row(delta):
     clamp_col()
 
 
+def scroll_log(delta):
+    global log_scroll
+    log_scroll = max(0, log_scroll + delta)
+
+
+def handle_up():
+    if cursor_row == 0:
+        scroll_log(1)
+    else:
+        move_row(-1)
+
+
+def handle_down():
+    if cursor_row == len(KEY_ROWS) - 1:
+        scroll_log(-1)
+    else:
+        move_row(1)
+
+
 def move_col(delta):
     global cursor_col
     n = len(KEY_ROWS[cursor_row])
@@ -150,12 +170,14 @@ def wrap_line(text, max_width):
 
 
 def add_log(text, pen):
+    global log_scroll
     for paragraph in text.split("\n"):
         if not paragraph:
             continue
         for line in wrap_line(paragraph, LOG_MAX_WIDTH):
             log_lines.append((line, pen))
     del log_lines[:-LOG_BUFFER_MAX]
+    log_scroll = 0  # snap back to the latest message whenever new content arrives
 
 
 REQUEST_TIMEOUT = 45  # without this, a stalled connection hangs forever with no way to recover
@@ -299,8 +321,19 @@ def activate_key():
 
 
 def draw_log():
+    global log_scroll
     status_lines = [(line, color.grey) for line in wrap_line(status_text, LOG_MAX_WIDTH)] if status_text else []
-    real_lines = log_lines[-(LOG_VISIBLE_LINES - len(status_lines)):] if len(status_lines) < LOG_VISIBLE_LINES else []
+    n_visible = LOG_VISIBLE_LINES - len(status_lines)
+
+    if n_visible <= 0:
+        real_lines = []
+    else:
+        total = len(log_lines)
+        max_scroll = max(0, total - n_visible)
+        log_scroll = max(0, min(log_scroll, max_scroll))
+        end = total - log_scroll
+        real_lines = log_lines[max(0, end - n_visible) : end]
+
     shown = real_lines + status_lines
 
     y = LOG_BOTTOM - len(shown) * LOG_LINE_HEIGHT
@@ -359,9 +392,9 @@ def update():
         return
 
     if badge.pressed(BUTTON_UP):
-        move_row(-1)
+        handle_up()
     if badge.pressed(BUTTON_DOWN):
-        move_row(1)
+        handle_down()
     if badge.pressed(BUTTON_A):
         move_col(-1)
     if badge.pressed(BUTTON_C):
