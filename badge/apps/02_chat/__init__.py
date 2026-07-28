@@ -391,14 +391,14 @@ def render():
 
 
 def update():
+    global status_text
     if not wifi.connect():
         wifi.tick()
-        screen.pen = color.black
-        screen.clear()
-        screen.pen = color.white
         spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
-        screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
+        status_text = f"connecting to {secrets.WIFI_SSID} {spinner}"
+        render()
         return
+    status_text = None  # clear the "connecting..." message left over from just before this
 
     if badge.pressed(BUTTON_UP):
         handle_up()
