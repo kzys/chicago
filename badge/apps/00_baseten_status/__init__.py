@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import wifi
 import requests
+import secrets
 
 STATUS_URL = "https://status.baseten.co/api/v2/summary.json"
 INCIDENTS_URL = "https://status.baseten.co/api/v2/incidents.json"
@@ -31,6 +32,9 @@ DAY_WIDTH = 3
 DAY_BAR_WIDTH = 2
 MARGIN = 4
 ROW_HEIGHT = 31
+
+SPINNER = "-/|\\"
+SPINNER_FRAME_MS = 150
 
 _CUM_DAYS = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
 
@@ -138,25 +142,75 @@ def draw_row(y, component_id, name, status):
         screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
+log_lines = []
+
+
+def draw_log():
+    # badge.update() (the only mid-frame display flush that actually exists —
+    # despite the docs, screen.update() is not a real attribute on this
+    # firmware) clears the framebuffer as a side effect of flushing it, so
+    # log lines are redrawn from scratch every time rather than assumed to
+    # persist across flushes.
+    screen.pen = color.black
+    screen.clear()
+    y = MARGIN
+    for text, pen in log_lines:
+        screen.pen = pen
+        screen.text(text, MARGIN, y)
+        y += 16
+
+
 def update():
     global status_last_fetch, incidents_last_fetch
 
-    screen.pen = color.black
-    screen.clear()
-
     if not wifi.connect():
         wifi.tick()
+        screen.pen = color.black
+        screen.clear()
         screen.pen = color.white
-        screen.text("Connecting to WiFi...", MARGIN, MARGIN)
+        spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
+        screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
         return
 
+    # Only show the boot log on the very first load — background refreshes
+    # (every 60s for status, every 30 min for incidents) happen silently so
+    # they don't keep interrupting the dashboard view. requests.get() has no
+    # progress reporting of its own, so this is just "which request is
+    # currently in flight", flushed to the screen before each blocking call.
+    booting = overall is None
+    if booting:
+        log_lines.clear()
+        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.white))
+        draw_log()
+
     if status_last_fetch is None or (badge.ticks - status_last_fetch) / 1000 > STATUS_REFRESH_SECONDS:
+        if booting:
+            log_lines.append(("GET /api/v2/summary.json", color.grey))
+            draw_log()
+            badge.update()
         fetch_status()
         status_last_fetch = badge.ticks
+        if booting and status_error:
+            log_lines.append((f"failed: {status_error}", color.red))
+            draw_log()
 
     if incidents_last_fetch is None or (badge.ticks - incidents_last_fetch) / 1000 > INCIDENTS_REFRESH_SECONDS:
+        if booting:
+            log_lines.append(("GET /api/v2/incidents.json", color.grey))
+            draw_log()
+            badge.update()
         fetch_history()
         incidents_last_fetch = badge.ticks
+        if booting and incidents_error:
+            log_lines.append((f"failed: {incidents_error}", color.red))
+            draw_log()
+
+    if booting and overall is None:
+        # first status fetch failed; stay on the boot log until the next retry
+        return
+
+    screen.pen = color.black
+    screen.clear()
 
     screen.pen = color.white
     screen.text("Baseten Status", MARGIN, MARGIN)
