@@ -11,3 +11,9 @@ install-%:
 .PHONY: uninstall-%
 uninstall-%:
 	python3 scripts/uninstall_app.py $*
+
+.PHONY: install-all
+install-all:
+	@for app in $$(grep -vE '^#|^$$' badge/apps/order.txt); do \
+		$(MAKE) install-$$app; \
+	done
