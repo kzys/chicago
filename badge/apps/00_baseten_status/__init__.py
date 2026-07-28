@@ -36,14 +36,15 @@ ROW_HEIGHT = 31
 # rather than a simple scaled gradient: any downtime at all immediately jumps
 # to halfway between green and yellow, then eases to fully yellow by 20min,
 # fully orange by 40min, fully red by 60min, and stays red past that.
-# hue/sat/val matched from the real site's clean-day fill (#00b86b)
-HUE_GREEN = 110
+HUE_GREEN = 85
 HUE_YELLOW = 42
 HUE_ORANGE = 21
 HUE_RED = 0
 HUE_HALFWAY = (HUE_GREEN + HUE_YELLOW) // 2
 
-CLEAN_COLOR = color.hsv(HUE_GREEN, 255, 184)
+# Badgeware's own dark green reads better against the black background than
+# the real site's exact (lighter, teal-leaning) clean-day fill did.
+CLEAN_COLOR = color.green
 
 PARTIAL_OUTAGE_WEIGHT = 0.3
 
@@ -246,7 +247,7 @@ def draw_log():
     # firmware) clears the framebuffer as a side effect of flushing it, so
     # log lines are redrawn from scratch every time rather than assumed to
     # persist across flushes.
-    screen.pen = color.white
+    screen.pen = color.black
     screen.clear()
     y = MARGIN
     for text, pen in log_lines:
@@ -260,9 +261,9 @@ def update():
 
     if not wifi.connect():
         wifi.tick()
-        screen.pen = color.white
-        screen.clear()
         screen.pen = color.black
+        screen.clear()
+        screen.pen = color.white
         spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
         screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
         return
@@ -275,7 +276,7 @@ def update():
     booting = overall is None
     if booting:
         log_lines.clear()
-        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.black))
+        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.white))
         draw_log()
 
     if status_last_fetch is None or (badge.ticks - status_last_fetch) / 1000 > STATUS_REFRESH_SECONDS:
@@ -304,17 +305,17 @@ def update():
         # first status fetch failed; stay on the boot log until the next retry
         return
 
-    screen.pen = color.white
+    screen.pen = color.black
     screen.clear()
 
-    screen.pen = color.black
+    screen.pen = color.white
     screen.text("Baseten Status", MARGIN, MARGIN)
 
     if overall is not None:
         screen.pen = color.green if overall_ok else color.orange
         screen.text(overall, MARGIN, MARGIN + 16)
     else:
-        screen.pen = color.black
+        screen.pen = color.white
         screen.text("Loading...", MARGIN, MARGIN + 16)
 
     if status_error or incidents_error:
