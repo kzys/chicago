@@ -36,8 +36,22 @@ def _lsblk(*columns: str) -> list[list[str]]:
     return [line.split() for line in out.splitlines()]
 
 
+def _tufty_present() -> bool:
+    return any(row and row[-1] == "TUFTY" for row in _lsblk("LABEL"))
+
+
+def _mpremote_ready() -> bool:
+    return (
+        subprocess.run(
+            ["uv", "run", "--project", str(PROJECT_ROOT), "mpremote", "connect", DEVICE, "exec", "pass"],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
 def msc_enter() -> None:
-    if any(row and row[-1] == "TUFTY" for row in _lsblk("LABEL")):
+    if _tufty_present():
         print("Already in disk mode, skipping launch.", file=sys.stderr)
         return
     print("Entering disk mode...", file=sys.stderr)
@@ -78,12 +92,16 @@ def msc_wait_for_mount() -> tuple[str, str]:
     # deadlock against each other.
     mount_point = ""
     for _ in range(10):
-        mount_point = subprocess.run(
+        result = subprocess.run(
             ["lsblk", "-no", "MOUNTPOINT", block_dev],
-            check=True,
             capture_output=True,
             text=True,
-        ).stdout.strip()
+        )
+        # A non-zero exit here (rather than just an empty MOUNTPOINT) means
+        # block_dev itself is gone — e.g. a previous msc_leave()'s reset only
+        # just now took effect. Keep polling instead of raising: it's the
+        # same "not mounted yet" state from the caller's point of view.
+        mount_point = result.stdout.strip() if result.returncode == 0 else ""
         if mount_point:
             break
         time.sleep(0.5)
@@ -123,3 +141,18 @@ def msc_leave(block_dev: str) -> None:
         time.sleep(2)
     print("Resetting badge...", file=sys.stderr)
     run_mpremote("reset")
+
+    # reset returns as soon as it's sent the request, well before the badge
+    # actually reboots — the TUFTY drive lingers for a moment and the serial
+    # port drops out and back during USB re-enumeration. Wait for both to
+    # settle so a caller chaining installs (e.g. `make install-all`) doesn't
+    # have its next msc_enter() mistake the not-yet-departed drive for still
+    # being in disk mode, then race a serial connection that isn't back yet.
+    print("Waiting for badge to finish resetting...", file=sys.stderr)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and _tufty_present():
+        time.sleep(0.5)
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not _mpremote_ready():
+        time.sleep(1)
