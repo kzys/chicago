@@ -11,5 +11,6 @@
 
 hello
 chat
+diffusion
 baseten_status
 hello_world
