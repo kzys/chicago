@@ -10,6 +10,56 @@ COLOR_NAMES = sorted(
 )
 FONT_NAMES = sorted(name for name in dir(rom_font) if not name.startswith("_"))
 
+ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+PANGRAM = "The quick brown fox jumps over the lazy dog"
+FONT_PREVIEW_W = 320 - MARGIN * 2  # wrap width for the preview lines
+
+
+def _is_monospace(font):
+    screen.font = font
+    widths = set(screen.measure_text(c)[0] for c in ALNUM)
+    return len(widths) == 1
+
+
+def _wrap_text(font, text, max_width):
+    screen.font = font
+    lines = []
+    current = ""
+    for word in text.split(" "):
+        candidate = word if not current else current + " " + word
+        w, _ = screen.measure_text(candidate)
+        if w <= max_width or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _build_font_row(name):
+    font = getattr(rom_font, name)
+    mono = _is_monospace(font)
+
+    screen.font = rom_font.sins
+    meta = "{} {}px {}".format(name, font.height, "monospace" if mono else "")
+    _, meta_h = screen.measure_text(meta)
+
+    return {
+        "font": font,
+        "meta": meta,
+        "meta_h": meta_h,
+        "lines": _wrap_text(font, PANGRAM, FONT_PREVIEW_W),
+        "line_h": font.height,
+    }
+
+
+# Per-font state, computed once at startup rather than on every redraw of
+# the font page. Same idea as draw_profile's per-line (text, font, color)
+# tuples, just with a pre-wrapped list of preview lines per font.
+FONT_ROWS = [_build_font_row(name) for name in FONT_NAMES]
+
 page = 0
 font_scroll = 0
 
@@ -67,14 +117,23 @@ def draw_colors():
 
 def draw_fonts():
     y = MARGIN
-    for name in FONT_NAMES[font_scroll:]:
-        screen.font = getattr(rom_font, name)
-        _, h = screen.measure_text(name)
-        if y + h > screen.height:
+    for row in FONT_ROWS[font_scroll:]:
+        block_h = row["meta_h"] + len(row["lines"]) * row["line_h"]
+        if y + block_h > screen.height:
             break
+
+        screen.font = rom_font.sins
+        screen.pen = color.smoke
+        screen.text(row["meta"], MARGIN, y)
+        y += row["meta_h"]
+
+        screen.font = row["font"]
         screen.pen = color.white
-        screen.text(name, MARGIN, y)
-        y += h + GAP
+        for line in row["lines"]:
+            screen.text(line, MARGIN, y)
+            y += row["line_h"]
+
+        y += GAP
 
 
 PAGES = [draw_profile, draw_colors, draw_fonts]
@@ -92,7 +151,7 @@ def update():
         if badge.pressed(BUTTON_UP):
             font_scroll = max(0, font_scroll - 1)
         if badge.pressed(BUTTON_DOWN):
-            font_scroll = min(len(FONT_NAMES) - 1, font_scroll + 1)
+            font_scroll = min(len(FONT_ROWS) - 1, font_scroll + 1)
 
     screen.pen = color.navy
     screen.clear()
