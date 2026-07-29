@@ -19,7 +19,6 @@ KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
 # A separately deployed model, not part of the shared Model APIs catalog
 # BASETEN_API_KEY authenticates against - hence the separate key/host.
 IMAGE_URL = "https://model-wgl4nj63.api.baseten.co/environments/production/predict"
-IMAGE_PATH = "/state/diffusion.png"
 # 240 outright breaks this model (returns a degenerate 1px-tall image) - it
 # needs multiple-of-64 dimensions. 256 is the closest one above the screen's
 # height, so there's only a thin crop left to do client-side.
@@ -50,7 +49,7 @@ COMPOSER_Y = KEYBOARD_TOP - MARGIN - LINE_HEIGHT
 
 AUTO_INTERVAL_MS = 30000  # regenerate on this cadence, reset by any submit
 
-buffer = "pelican riding a bicycle in front of a famous Chicago landmark"
+buffer = "pelican riding a bicycle in Chicago"
 cursor_row = 1
 cursor_col = 0
 status_text = None
@@ -147,9 +146,10 @@ def generate_image():
                 raise RuntimeError("HTTP " + str(r.status_code) + ": " + body[:80])
             data = r.json()["data"]
             r.close()
-            with open(IMAGE_PATH, "wb") as f:
-                f.write(binascii.a2b_base64(data))
-            return image.load(IMAGE_PATH)
+            # image.load() accepts raw bytes directly (undocumented, but
+            # confirmed to work) - decoding straight into memory avoids
+            # flash wear from writing every auto-refresh to /state.
+            return image.load(binascii.a2b_base64(data))
         except (OSError, ValueError, KeyError, RuntimeError) as e:
             last_error = e
             if attempt < CALL_ATTEMPTS - 1:
