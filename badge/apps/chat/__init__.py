@@ -38,16 +38,24 @@ STATIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_caselights",
-            "description": "Set the brightness of the badge's four rear LEDs, all to the same level.",
+            "description": (
+                "Set the brightness of the badge's four rear LEDs. 'level' sets all four at "
+                "once; level1-level4 address individual LEDs and override 'level' for that one. "
+                "Any LED with no value at all (neither 'level' nor its own levelN) is set to 0."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "level": {
                         "type": "number",
-                        "description": "Brightness from 0 (off) to 1 (full brightness)",
-                    }
+                        "description": "Brightness from 0 (off) to 1 (full brightness) applied to all four LEDs",
+                    },
+                    "level1": {"type": "number", "description": "Brightness for LED 1 alone (0-1)"},
+                    "level2": {"type": "number", "description": "Brightness for LED 2 alone (0-1)"},
+                    "level3": {"type": "number", "description": "Brightness for LED 3 alone (0-1)"},
+                    "level4": {"type": "number", "description": "Brightness for LED 4 alone (0-1)"},
                 },
-                "required": ["level"],
+                "required": [],
             },
         },
     },
@@ -118,9 +126,10 @@ def tool_get_battery_level(args):
 
 
 def tool_set_caselights(args):
-    level = max(0.0, min(1.0, float(args.get("level", 0))))
-    badge.caselights(level)
-    return {"ok": True, "level": level}
+    default = args.get("level", 0)
+    levels = [max(0.0, min(1.0, float(args.get("level" + str(i), default)))) for i in range(1, 5)]
+    badge.caselights(*levels)
+    return {"ok": True, "levels": levels}
 
 
 def tool_switch_model(args):
