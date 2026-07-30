@@ -156,6 +156,7 @@ def new_state():
         # time, since draw_row() runs this over 90 days x every component,
         # every frame.
         "history": {},
+        "history_loaded": False,
         "incidents_last_fetch": None,
         "incidents_error": None,
         "activity": "",
@@ -279,6 +280,7 @@ def fetch_history(service, state):
                 colors.append(_downtime_color(total))
             history[component_id] = colors
         state["history"] = history
+        state["history_loaded"] = True
         state["incidents_error"] = None
     except (OSError, ValueError, KeyError) as e:
         state["incidents_error"] = str(e)
@@ -289,10 +291,15 @@ def draw_row(y, state, component_id, name, status):
     screen.pen = STATUS_COLORS.get(status, color.grey)
     screen.text(name, MARGIN, y)
 
-    slots = state["history"].get(component_id)
+    # A component absent from history means "confirmed zero incidents" once
+    # incidents have actually been fetched at least once -- but before that
+    # first fetch completes, absent just means "unknown yet", which should
+    # read as gray rather than the same green as a confirmed-clean day.
+    slots = state["history"].get(component_id) if state["history_loaded"] else None
+    bar_color = color.grey if not state["history_loaded"] else CLEAN_COLOR
     bar_y = y + 15
     for i in range(HISTORY_DAYS):
-        screen.pen = slots[HISTORY_DAYS - 1 - i] if slots else CLEAN_COLOR
+        screen.pen = slots[HISTORY_DAYS - 1 - i] if slots else bar_color
         screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
