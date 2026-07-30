@@ -76,7 +76,21 @@ def draw_profile():
         ("", rom_font.nope, color.smoke),
         ("Infrastructure / Runtime Fabric", rom_font.nope, color.smoke),
         ("Seattle, Washington", rom_font.nope, color.smoke),
-        ("Battery: {}%  {}".format(badge.battery_level(), utc_now()), rom_font.teatime, color.white),
+        ("", rom_font.nope, color.smoke),
+        (
+            "  ".join(
+                [
+                    "Battery: {}".format(
+                        "Charging" if badge.is_charging() else "{}%".format(badge.battery_level())
+                    ),
+                    "{:.2f}V".format(badge.battery_voltage()),
+                ]
+                + (["USB"] if badge.usb_connected() else [])
+            ),
+            rom_font.teatime,
+            color.white,
+        ),
+        (utc_now(), rom_font.teatime, color.white),
     ]
 
     heights = []
