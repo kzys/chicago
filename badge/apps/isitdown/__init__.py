@@ -36,14 +36,12 @@ HISTORY_DAYS = 90
 DAY_WIDTH = 3
 DAY_BAR_WIDTH = 2
 MARGIN = 4
-ROW_HEIGHT = 31
+ROW_HEIGHT = 28
 
-# Header is a single small-font line; the component list starts right below
-# it. The footer reserves two small-font lines at the bottom of the screen
-# for the overall status (and, when present, an error line above it) so
-# they don't get pushed around by how many components a service has.
-ROWS_START_Y = 24
-FOOTER_LINE_H = 14
+# Header (title, overall status, optional error line) occupies a fixed
+# 44px band regardless of how many of its lines are actually shown, so the
+# component list below always starts at the same place.
+ROWS_START_Y = MARGIN + 44
 
 # Statuspage documents this exact algorithm at
 # support.atlassian.com/statuspage/docs/display-historical-uptime-of-components:
@@ -141,8 +139,9 @@ def _union_minutes(intervals):
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-FOOTER_STATUS_Y = screen.height - MARGIN - FOOTER_LINE_H
-FOOTER_ERROR_Y = FOOTER_STATUS_Y - FOOTER_LINE_H
+# Bottom bar for transient app activity ("Connecting to wifi", "GET ..."),
+# separate from the system status block up top.
+ACTIVITY_Y = screen.height - MARGIN - 12
 
 
 def new_state():
@@ -159,13 +158,42 @@ def new_state():
         "history": {},
         "incidents_last_fetch": None,
         "incidents_error": None,
-        "log_lines": [],
+        "activity": "",
+        "activity_color": color.grey,
     }
 
 
 states = [new_state() for _ in SERVICES]
 page = 0
 time_synced = False
+
+# wifi.connect() can raise OSError(EPERM) if the CYW43 radio has wedged —
+# seen in practice, cause unconfirmed, and retrying immediately doesn't
+# clear it (only a hardware reset does). WIFI_RETRY_MS throttles retries so
+# a wedged radio doesn't get hammered every frame; the error is surfaced in
+# the activity bar instead of crashing the app with a raw traceback.
+WIFI_RETRY_MS = 5000
+wifi_error = None
+wifi_retry_at = 0
+wifi_announced = False
+
+
+def ensure_wifi():
+    global wifi_error, wifi_retry_at
+
+    if wifi_error is not None and badge.ticks < wifi_retry_at:
+        return False
+    try:
+        if wifi.connect():
+            wifi_error = None
+            return True
+        wifi.tick()
+        wifi_error = None
+        return False
+    except OSError as e:
+        wifi_error = str(e)
+        wifi_retry_at = badge.ticks + WIFI_RETRY_MS
+        return False
 
 
 def fetch_status(service, state):
@@ -257,7 +285,7 @@ def fetch_history(service, state):
 
 
 def draw_row(y, state, component_id, name, status):
-    screen.font = rom_font.nope
+    screen.font = rom_font.sins
     screen.pen = STATUS_COLORS.get(status, color.grey)
     screen.text(name, MARGIN, y)
 
@@ -268,23 +296,44 @@ def draw_row(y, state, component_id, name, status):
         screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
-def draw_log(state):
+def set_activity(state, text, pen=color.grey):
+    state["activity"] = text
+    state["activity_color"] = pen
+
+
+def draw(service, state):
     # badge.update() (the only mid-frame display flush that actually exists —
     # despite the docs, screen.update() is not a real attribute on this
     # firmware) clears the framebuffer as a side effect of flushing it, so
-    # log lines are redrawn from scratch every time rather than assumed to
-    # persist across flushes.
+    # the whole frame is redrawn from scratch every time rather than assumed
+    # to persist across flushes.
     screen.pen = color.black
     screen.clear()
-    y = MARGIN
-    for text, pen in state["log_lines"]:
-        screen.pen = pen
-        screen.text(text, MARGIN, y)
-        y += 16
+
+    screen.font = rom_font.sins
+    screen.pen = color.white
+    screen.text("{} Status".format(service["name"]), MARGIN, MARGIN)
+
+    if state["overall"] is not None:
+        screen.pen = color.green if state["overall_ok"] else color.orange
+        screen.text(state["overall"], MARGIN, MARGIN + 16)
+
+    if state["status_error"] or state["incidents_error"]:
+        screen.pen = color.red
+        screen.text("Update failed, showing last known", MARGIN, MARGIN + 32)
+
+    y = ROWS_START_Y
+    for component_id, name, status in state["components"]:
+        draw_row(y, state, component_id, name, status)
+        y += ROW_HEIGHT
+
+    screen.font = rom_font.sins
+    screen.pen = state["activity_color"]
+    screen.text(state["activity"], MARGIN, ACTIVITY_Y)
 
 
 def update():
-    global page
+    global page, wifi_announced
 
     if badge.pressed(BUTTON_A):
         page = (page - 1) % len(SERVICES)
@@ -294,82 +343,54 @@ def update():
     service = SERVICES[page]
     state = states[page]
 
-    if not wifi.connect():
-        wifi.tick()
-        screen.pen = color.black
-        screen.clear()
-        screen.pen = color.white
+    if not ensure_wifi():
+        wifi_announced = False
         spinner = SPINNER[(badge.ticks // SPINNER_FRAME_MS) % len(SPINNER)]
-        screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
+        if wifi_error:
+            set_activity(state, f"wifi error: {wifi_error} (retrying)", color.red)
+        else:
+            set_activity(state, f"Connecting to {secrets.WIFI_SSID} {spinner}")
+        draw(service, state)
         return
 
-    # Only show the boot log on a service's very first load — background
-    # refreshes (every 60s for status, every 30 min for incidents) happen
-    # silently so they don't keep interrupting the dashboard view.
-    # requests.get() has no progress reporting of its own, so this is just
-    # "which request is currently in flight", flushed to the screen before
-    # each blocking call.
-    booting = state["overall"] is None
-    if booting:
-        state["log_lines"].clear()
-        state["log_lines"].append((f"Connected to {secrets.WIFI_SSID}", color.white))
-        draw_log(state)
+    if not wifi_announced:
+        wifi_announced = True
+        set_activity(state, f"Connected to {secrets.WIFI_SSID}")
+        draw(service, state)
+        badge.update()
 
+    # requests.get() has no progress reporting of its own, so the activity
+    # bar is just "which request is currently in flight", flushed to the
+    # screen before each blocking call.
     if (
         state["status_last_fetch"] is None
         or (badge.ticks - state["status_last_fetch"]) / 1000 > STATUS_REFRESH_SECONDS
     ):
-        if booting:
-            state["log_lines"].append((f"GET {service['name']} summary", color.grey))
-            draw_log(state)
-            badge.update()
+        set_activity(state, f"GET {service['status_url']}")
+        draw(service, state)
+        badge.update()
         fetch_status(service, state)
         state["status_last_fetch"] = badge.ticks
-        if booting and state["status_error"]:
-            state["log_lines"].append((f"failed: {state['status_error']}", color.red))
-            draw_log(state)
+        if state["status_error"]:
+            set_activity(state, f"failed: {state['status_error']}", color.red)
+        else:
+            set_activity(state, "")
 
     if (
         state["incidents_last_fetch"] is None
         or (badge.ticks - state["incidents_last_fetch"]) / 1000 > INCIDENTS_REFRESH_SECONDS
     ):
-        if booting:
-            state["log_lines"].append((f"GET {service['name']} incidents", color.grey))
-            draw_log(state)
-            badge.update()
+        set_activity(state, f"GET {service['incidents_url']}")
+        draw(service, state)
+        badge.update()
         fetch_history(service, state)
         state["incidents_last_fetch"] = badge.ticks
-        if booting and state["incidents_error"]:
-            state["log_lines"].append((f"failed: {state['incidents_error']}", color.red))
-            draw_log(state)
+        if state["incidents_error"]:
+            set_activity(state, f"failed: {state['incidents_error']}", color.red)
+        else:
+            set_activity(state, "")
 
-    if booting and state["overall"] is None:
-        # first status fetch failed; stay on the boot log until the next retry
-        return
-
-    screen.pen = color.black
-    screen.clear()
-
-    screen.font = rom_font.sins
-    screen.pen = color.white
-    screen.text("{} Status".format(service["name"]), MARGIN, MARGIN)
-
-    y = ROWS_START_Y
-    for component_id, name, status in state["components"]:
-        draw_row(y, state, component_id, name, status)
-        y += ROW_HEIGHT
-
-    screen.font = rom_font.sins
-    if state["status_error"] or state["incidents_error"]:
-        screen.pen = color.red
-        screen.text("Update failed, showing last known", MARGIN, FOOTER_ERROR_Y)
-
-    if state["overall"] is not None:
-        screen.pen = color.green if state["overall_ok"] else color.orange
-        screen.text(state["overall"], MARGIN, FOOTER_STATUS_Y)
-    else:
-        screen.pen = color.white
-        screen.text("Loading...", MARGIN, FOOTER_STATUS_Y)
+    draw(service, state)
 
 
 run(update)
