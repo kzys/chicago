@@ -12,6 +12,6 @@
 hello
 chat
 diffusion
-baseten_status
+isitdown
 hello_world
 wifi_scan
