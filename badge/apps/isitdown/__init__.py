@@ -38,6 +38,13 @@ DAY_BAR_WIDTH = 2
 MARGIN = 4
 ROW_HEIGHT = 31
 
+# Header is a single small-font line; the component list starts right below
+# it. The footer reserves two small-font lines at the bottom of the screen
+# for the overall status (and, when present, an error line above it) so
+# they don't get pushed around by how many components a service has.
+ROWS_START_Y = 24
+FOOTER_LINE_H = 14
+
 # Statuspage documents this exact algorithm at
 # support.atlassian.com/statuspage/docs/display-historical-uptime-of-components:
 # only major_outage/partial_outage minutes count (degraded_performance and
@@ -133,6 +140,9 @@ def _union_minutes(intervals):
 
 badge.mode(HIRES)
 screen.font = rom_font.nope
+
+FOOTER_STATUS_Y = screen.height - MARGIN - FOOTER_LINE_H
+FOOTER_ERROR_Y = FOOTER_STATUS_Y - FOOTER_LINE_H
 
 
 def new_state():
@@ -247,6 +257,7 @@ def fetch_history(service, state):
 
 
 def draw_row(y, state, component_id, name, status):
+    screen.font = rom_font.nope
     screen.pen = STATUS_COLORS.get(status, color.grey)
     screen.text(name, MARGIN, y)
 
@@ -339,24 +350,26 @@ def update():
     screen.pen = color.black
     screen.clear()
 
+    screen.font = rom_font.sins
     screen.pen = color.white
-    screen.text("{} Status ({}/{})".format(service["name"], page + 1, len(SERVICES)), MARGIN, MARGIN)
+    screen.text("{} Status".format(service["name"]), MARGIN, MARGIN)
 
-    if state["overall"] is not None:
-        screen.pen = color.green if state["overall_ok"] else color.orange
-        screen.text(state["overall"], MARGIN, MARGIN + 16)
-    else:
-        screen.pen = color.white
-        screen.text("Loading...", MARGIN, MARGIN + 16)
-
-    if state["status_error"] or state["incidents_error"]:
-        screen.pen = color.red
-        screen.text("Update failed, showing last known", MARGIN, MARGIN + 32)
-
-    y = MARGIN + 44
+    y = ROWS_START_Y
     for component_id, name, status in state["components"]:
         draw_row(y, state, component_id, name, status)
         y += ROW_HEIGHT
+
+    screen.font = rom_font.sins
+    if state["status_error"] or state["incidents_error"]:
+        screen.pen = color.red
+        screen.text("Update failed, showing last known", MARGIN, FOOTER_ERROR_Y)
+
+    if state["overall"] is not None:
+        screen.pen = color.green if state["overall_ok"] else color.orange
+        screen.text(state["overall"], MARGIN, FOOTER_STATUS_Y)
+    else:
+        screen.pen = color.white
+        screen.text("Loading...", MARGIN, FOOTER_STATUS_Y)
 
 
 run(update)
