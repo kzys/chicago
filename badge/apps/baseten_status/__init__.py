@@ -4,8 +4,18 @@ import wifi
 import requests
 import secrets
 
-STATUS_URL = "https://status.baseten.co/api/v2/summary.json"
-INCIDENTS_URL = "https://status.baseten.co/api/v2/incidents.json"
+SERVICES = [
+    {
+        "name": "Baseten",
+        "status_url": "https://status.baseten.co/api/v2/summary.json",
+        "incidents_url": "https://status.baseten.co/api/v2/incidents.json",
+    },
+    {
+        "name": "Claude",
+        "status_url": "https://status.claude.com/api/v2/summary.json",
+        "incidents_url": "https://status.claude.com/api/v2/incidents.json",
+    },
+]
 STATUS_REFRESH_SECONDS = 60
 INCIDENTS_REFRESH_SECONDS = 1800
 
@@ -124,36 +134,44 @@ def _union_minutes(intervals):
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-components = []
-overall = None
-overall_ok = True
-status_last_fetch = None
-status_error = None
 
-# component id -> list[HISTORY_DAYS] of color, index 0 = most recent day.
-# Colors are precomputed once per fetch rather than at draw time, since
-# draw_row() runs this over 90 days x every component, every frame.
-history = {}
-incidents_last_fetch = None
-incidents_error = None
+def new_state():
+    return {
+        "components": [],
+        "overall": None,
+        "overall_ok": True,
+        "status_last_fetch": None,
+        "status_error": None,
+        # component id -> list[HISTORY_DAYS] of color, index 0 = most recent
+        # day. Colors are precomputed once per fetch rather than at draw
+        # time, since draw_row() runs this over 90 days x every component,
+        # every frame.
+        "history": {},
+        "incidents_last_fetch": None,
+        "incidents_error": None,
+        "log_lines": [],
+    }
+
+
+states = [new_state() for _ in SERVICES]
+page = 0
 time_synced = False
 
 
-def fetch_status():
-    global components, overall, overall_ok, status_error
+def fetch_status(service, state):
     try:
-        r = requests.get(STATUS_URL)
+        r = requests.get(service["status_url"])
         j = r.json()
-        components = [(c["id"], c["name"], c["status"]) for c in j["components"]]
-        overall = j["status"]["description"]
-        overall_ok = j["status"]["indicator"] == "none"
-        status_error = None
+        state["components"] = [(c["id"], c["name"], c["status"]) for c in j["components"]]
+        state["overall"] = j["status"]["description"]
+        state["overall_ok"] = j["status"]["indicator"] == "none"
+        state["status_error"] = None
     except (OSError, ValueError) as e:
-        status_error = str(e)
+        state["status_error"] = str(e)
 
 
-def fetch_history():
-    global history, incidents_error, time_synced
+def fetch_history(service, state):
+    global time_synced
 
     if not time_synced:
         try:
@@ -167,7 +185,7 @@ def fetch_history():
         today = datetime.now(timezone.utc)
         today_ordinal = _ordinal(today.year, today.month, today.day)
 
-        r = requests.get(INCIDENTS_URL)
+        r = requests.get(service["incidents_url"])
         j = r.json()
 
         # major_outage beats partial_outage as the "worst state reached" for a
@@ -192,7 +210,7 @@ def fetch_history():
 
             worst = {}
             for update_entry in incident["incident_updates"]:
-                for affected in update_entry["affected_components"]:
+                for affected in update_entry["affected_components"] or []:
                     cid = affected["code"]
                     rank = OUTAGE_RANK.get(affected["new_status"], 0)
                     if rank > worst.get(cid, 0):
@@ -222,26 +240,24 @@ def fetch_history():
                 total = major_minutes + partial_minutes * PARTIAL_OUTAGE_WEIGHT
                 colors.append(_downtime_color(total))
             history[component_id] = colors
-        incidents_error = None
+        state["history"] = history
+        state["incidents_error"] = None
     except (OSError, ValueError, KeyError) as e:
-        incidents_error = str(e)
+        state["incidents_error"] = str(e)
 
 
-def draw_row(y, component_id, name, status):
+def draw_row(y, state, component_id, name, status):
     screen.pen = STATUS_COLORS.get(status, color.grey)
     screen.text(name, MARGIN, y)
 
-    slots = history.get(component_id)
+    slots = state["history"].get(component_id)
     bar_y = y + 15
     for i in range(HISTORY_DAYS):
         screen.pen = slots[HISTORY_DAYS - 1 - i] if slots else CLEAN_COLOR
         screen.rectangle(MARGIN + i * DAY_WIDTH, bar_y, DAY_BAR_WIDTH, 10)
 
 
-log_lines = []
-
-
-def draw_log():
+def draw_log(state):
     # badge.update() (the only mid-frame display flush that actually exists —
     # despite the docs, screen.update() is not a real attribute on this
     # firmware) clears the framebuffer as a side effect of flushing it, so
@@ -250,14 +266,22 @@ def draw_log():
     screen.pen = color.black
     screen.clear()
     y = MARGIN
-    for text, pen in log_lines:
+    for text, pen in state["log_lines"]:
         screen.pen = pen
         screen.text(text, MARGIN, y)
         y += 16
 
 
 def update():
-    global status_last_fetch, incidents_last_fetch
+    global page
+
+    if badge.pressed(BUTTON_A):
+        page = (page - 1) % len(SERVICES)
+    if badge.pressed(BUTTON_C):
+        page = (page + 1) % len(SERVICES)
+
+    service = SERVICES[page]
+    state = states[page]
 
     if not wifi.connect():
         wifi.tick()
@@ -268,40 +292,47 @@ def update():
         screen.text(f"Connecting to {secrets.WIFI_SSID} {spinner}", MARGIN, MARGIN)
         return
 
-    # Only show the boot log on the very first load — background refreshes
-    # (every 60s for status, every 30 min for incidents) happen silently so
-    # they don't keep interrupting the dashboard view. requests.get() has no
-    # progress reporting of its own, so this is just "which request is
-    # currently in flight", flushed to the screen before each blocking call.
-    booting = overall is None
+    # Only show the boot log on a service's very first load — background
+    # refreshes (every 60s for status, every 30 min for incidents) happen
+    # silently so they don't keep interrupting the dashboard view.
+    # requests.get() has no progress reporting of its own, so this is just
+    # "which request is currently in flight", flushed to the screen before
+    # each blocking call.
+    booting = state["overall"] is None
     if booting:
-        log_lines.clear()
-        log_lines.append((f"Connected to {secrets.WIFI_SSID}", color.white))
-        draw_log()
+        state["log_lines"].clear()
+        state["log_lines"].append((f"Connected to {secrets.WIFI_SSID}", color.white))
+        draw_log(state)
 
-    if status_last_fetch is None or (badge.ticks - status_last_fetch) / 1000 > STATUS_REFRESH_SECONDS:
+    if (
+        state["status_last_fetch"] is None
+        or (badge.ticks - state["status_last_fetch"]) / 1000 > STATUS_REFRESH_SECONDS
+    ):
         if booting:
-            log_lines.append(("GET /api/v2/summary.json", color.grey))
-            draw_log()
+            state["log_lines"].append((f"GET {service['name']} summary", color.grey))
+            draw_log(state)
             badge.update()
-        fetch_status()
-        status_last_fetch = badge.ticks
-        if booting and status_error:
-            log_lines.append((f"failed: {status_error}", color.red))
-            draw_log()
+        fetch_status(service, state)
+        state["status_last_fetch"] = badge.ticks
+        if booting and state["status_error"]:
+            state["log_lines"].append((f"failed: {state['status_error']}", color.red))
+            draw_log(state)
 
-    if incidents_last_fetch is None or (badge.ticks - incidents_last_fetch) / 1000 > INCIDENTS_REFRESH_SECONDS:
+    if (
+        state["incidents_last_fetch"] is None
+        or (badge.ticks - state["incidents_last_fetch"]) / 1000 > INCIDENTS_REFRESH_SECONDS
+    ):
         if booting:
-            log_lines.append(("GET /api/v2/incidents.json", color.grey))
-            draw_log()
+            state["log_lines"].append((f"GET {service['name']} incidents", color.grey))
+            draw_log(state)
             badge.update()
-        fetch_history()
-        incidents_last_fetch = badge.ticks
-        if booting and incidents_error:
-            log_lines.append((f"failed: {incidents_error}", color.red))
-            draw_log()
+        fetch_history(service, state)
+        state["incidents_last_fetch"] = badge.ticks
+        if booting and state["incidents_error"]:
+            state["log_lines"].append((f"failed: {state['incidents_error']}", color.red))
+            draw_log(state)
 
-    if booting and overall is None:
+    if booting and state["overall"] is None:
         # first status fetch failed; stay on the boot log until the next retry
         return
 
@@ -309,22 +340,22 @@ def update():
     screen.clear()
 
     screen.pen = color.white
-    screen.text("Baseten Status", MARGIN, MARGIN)
+    screen.text("{} Status ({}/{})".format(service["name"], page + 1, len(SERVICES)), MARGIN, MARGIN)
 
-    if overall is not None:
-        screen.pen = color.green if overall_ok else color.orange
-        screen.text(overall, MARGIN, MARGIN + 16)
+    if state["overall"] is not None:
+        screen.pen = color.green if state["overall_ok"] else color.orange
+        screen.text(state["overall"], MARGIN, MARGIN + 16)
     else:
         screen.pen = color.white
         screen.text("Loading...", MARGIN, MARGIN + 16)
 
-    if status_error or incidents_error:
+    if state["status_error"] or state["incidents_error"]:
         screen.pen = color.red
         screen.text("Update failed, showing last known", MARGIN, MARGIN + 32)
 
     y = MARGIN + 44
-    for component_id, name, status in components:
-        draw_row(y, component_id, name, status)
+    for component_id, name, status in state["components"]:
+        draw_row(y, state, component_id, name, status)
         y += ROW_HEIGHT
 
 
