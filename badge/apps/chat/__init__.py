@@ -17,6 +17,14 @@ KEY_ROWS = [
 # consistent instead of landing on a visually unrelated key.
 KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
 
+# Host-provisioned only (make install-baseten-state FILE=...), no on-device
+# entry flow -- see scripts/install_state_file.py.
+try:
+    with open("/state/baseten.json") as _f:
+        BASETEN_API_KEY = json.load(_f).get("BASETEN_API_KEY")
+except (OSError, ValueError):
+    BASETEN_API_KEY = None
+
 BASETEN_URL = "https://inference.baseten.co/v1/chat/completions"
 MODELS_URL = "https://inference.baseten.co/v1/models"
 MODEL = "zai-org/GLM-5.2-Fast"
@@ -156,7 +164,7 @@ def fetch_available_models():
     try:
         r = requests.get(
             MODELS_URL,
-            headers={"Authorization": "Api-Key " + secrets.BASETEN_API_KEY},
+            headers={"Authorization": "Api-Key " + BASETEN_API_KEY},
             timeout=REQUEST_TIMEOUT,
         )
         if r.status_code == 200:
@@ -256,7 +264,7 @@ def call_model():
         BASETEN_URL,
         headers={
             "Content-Type": "application/json",
-            "Authorization": "Api-Key " + secrets.BASETEN_API_KEY,
+            "Authorization": "Api-Key " + BASETEN_API_KEY,
         },
         json={
             "model": MODEL,

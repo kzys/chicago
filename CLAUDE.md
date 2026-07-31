@@ -11,7 +11,9 @@ Apps for a Pimoroni Tufty 2350 badge (Badgeware firmware, MicroPython). Each app
 ```
 make install-<app_name>      # e.g. make install-chat - copies badge/apps/<app_name> to the device and resets it
 make uninstall-<app_name>    # removes it from the device
-make install-secrets FILE=path/to/secrets.py   # copies a local secrets.py onto the device
+make install-secrets FILE=path/to/secrets.py   # copies a local secrets.py onto the device (defaults to ./secrets.py)
+make install-config-state FILE=path/to/config.json    # copies known WiFi networks onto the device, see badge/apps/config
+make install-baseten-state FILE=path/to/baseten.json  # copies Baseten API keys onto the device
 ```
 
 `DEVICE` defaults to `/dev/ttyACM0` and can be overridden: `make install-chat DEVICE=/dev/ttyACM1`.
@@ -29,7 +31,7 @@ There is no linter, formatter, or test suite configured in this project — don'
 - Install/uninstall work by launching the badge's own `mass_storage` app to expose its filesystem as a USB drive (`scripts/_msc_common.py`), copying files, unmounting, then running `mpremote ... reset` — **this reboots the whole badge**, killing whatever app was running.
 - Because of that reset, **installing an app does not hot-reload a currently-running instance**. After `make install-X`, you must relaunch the app from the on-device menu (or via `launch()`, see below) to actually run the new code — otherwise you're testing stale behavior.
 - The badge's menu has no concept of app order — it just lists `/system/apps` entries alphabetically. `badge/apps/order.txt` is the source of truth for menu order; install/uninstall (`scripts/_order_common.py`) prefix the on-device directory with that 1-based index (e.g. local `badge/apps/chat/` becomes `/system/apps/02_chat` if it's second in `order.txt`). Local directory names under `badge/apps/` stay unprefixed on purpose, so reordering apps is a one-line edit to `order.txt` instead of a directory rename that muddies git history. A new app must be added to `order.txt` or `make install-<app_name>` fails.
-- `secrets.py` (WiFi credentials, API keys) is never stored in this repo. It only exists on the device, written via `make install-secrets`. Treat it as a live secret file when reconstructing it locally for updates — read the current one off the device (`mpremote fs cat /system/secrets.py`) rather than guessing its contents.
+- `secrets.py` (repo root) holds no actual credentials and is safe to commit — it's just `REGION`/`TIMEZONE` plus logic that loads `WIFI_SSID`/`WIFI_PASSWORD` from `/state/config.json` at import time (needed there specifically because the firmware's own `wifi.connect()` reads those two attributes directly off the `secrets` module). `config.json` is written by `badge/apps/config`'s known-network picker. Baseten API keys aren't routed through `secrets.py` at all — `badge/apps/chat` and `badge/apps/diffusion` each load their own key straight from `/state/baseten.json`, host-provisioned only via `make install-baseten-state`. The real secret values themselves live only on the device and in gitignored local files (`config.json`, `baseten.json`) used to provision it — never guess or fabricate those, and never commit them.
 
 ## Badgeware app architecture
 

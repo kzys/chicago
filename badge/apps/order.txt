@@ -14,4 +14,4 @@ chat
 diffusion
 isitdown
 hello_world
-wifi_scan
+config

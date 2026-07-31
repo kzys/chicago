@@ -1,4 +1,5 @@
 import binascii
+import json
 
 import wifi
 import requests
@@ -15,6 +16,14 @@ KEY_ROWS = [
 # staggered QWERTY rows) so UP/DOWN keeps the cursor's column meaning
 # consistent instead of landing on a visually unrelated key.
 KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
+
+# Host-provisioned only (make install-baseten-state FILE=...), no on-device
+# entry flow -- see scripts/install_state_file.py.
+try:
+    with open("/state/baseten.json") as _f:
+        BASETEN_IMAGE_API_KEY = json.load(_f).get("BASETEN_IMAGE_API_KEY")
+except (OSError, ValueError):
+    BASETEN_IMAGE_API_KEY = None
 
 # A separately deployed model, not part of the shared Model APIs catalog
 # BASETEN_API_KEY authenticates against - hence the separate key/host.
@@ -131,7 +140,7 @@ def generate_image():
                 IMAGE_URL,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": "Api-Key " + secrets.BASETEN_IMAGE_API_KEY,
+                    "Authorization": "Api-Key " + BASETEN_IMAGE_API_KEY,
                 },
                 json={
                     "prompt": buffer,
