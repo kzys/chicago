@@ -11,7 +11,7 @@ COLOR_NAMES = sorted(
 FONT_NAMES = sorted(name for name in dir(rom_font) if not name.startswith("_"))
 
 ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-PANGRAM = "The quick brown fox jumps over the lazy dog"
+PANGRAM = "the quick brown fox jumps over the lazy dog"
 FONT_PREVIEW_W = 320 - MARGIN * 2  # wrap width for the preview lines
 
 
@@ -50,7 +50,9 @@ def _build_font_row(name):
         "font": font,
         "meta": meta,
         "meta_h": meta_h,
-        "lines": _wrap_text(font, PANGRAM, FONT_PREVIEW_W),
+        # Both cases, not the previous single Title-cased line, so a font's
+        # lowercase and uppercase glyphs are both actually visible.
+        "lines": _wrap_text(font, PANGRAM, FONT_PREVIEW_W) + _wrap_text(font, PANGRAM.upper(), FONT_PREVIEW_W),
         "line_h": font.height,
     }
 
