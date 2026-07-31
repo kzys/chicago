@@ -49,20 +49,8 @@ def load_known_networks():
 
 
 def select_network(ssid):
-    # MicroPython's json.dump() has no indent= support, so this hand-builds
-    # the (fixed, shallow) layout instead -- but still delegates every actual
-    # string value to json.dumps() rather than hand-escaping it, so SSIDs or
-    # passwords with quotes/backslashes/unicode still come out correct.
-    lines = ["{", '  "networks": {']
-    items = list(known_networks.items())
-    for i, (net_ssid, password) in enumerate(items):
-        comma = "," if i < len(items) - 1 else ""
-        lines.append("    {}: {}{}".format(json.dumps(net_ssid), json.dumps(password), comma))
-    lines.append("  },")
-    lines.append('  "selected": {}'.format(json.dumps(ssid)))
-    lines.append("}")
     with open(KNOWN_NETWORKS_PATH, "w") as f:
-        f.write("\n".join(lines))
+        json.dump({"networks": known_networks, "selected": ssid}, f)
 
 
 def start_connect(ssid):
