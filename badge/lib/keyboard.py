@@ -35,14 +35,15 @@ def top_y(margin):
     return screen.height - margin - len(ROWS) * ROW_HEIGHT
 
 
-def key_width(row_idx, margin):
-    return (screen.width - 2 * margin) // len(ROWS[row_idx])
-
-
-def row_x_offset(row_idx, margin):
+def col_x(row_idx, col_idx, margin):
+    # Each column's edge computed independently (col_idx * available // n)
+    # rather than from a single shared width (available // n) * col_idx --
+    # the latter loses whatever available isn't evenly divisible by n as an
+    # uncovered gap after the last column; this puts that remainder into
+    # the last column's width instead, so the row exactly fills [margin,
+    # screen.width - margin] with no leftover.
     n = len(ROWS[row_idx])
-    w = key_width(row_idx, margin)
-    return margin + (screen.width - 2 * margin - n * w) // 2
+    return margin + col_idx * (screen.width - 2 * margin) // n
 
 
 def clamp_col():
@@ -74,24 +75,33 @@ def draw(margin):
     screen.font = FONT
 
     top = top_y(margin)
+    n_rows = len(ROWS)
     for row_idx, key_row in enumerate(ROWS):
-        w = key_width(row_idx, margin)
-        x0 = row_x_offset(row_idx, margin)
         y = top + row_idx * ROW_HEIGHT
         # Inset only on the trailing edge (right/bottom) rather than both --
         # an inter-key gap of exactly KEY_PAD instead of KEY_PAD * 2, without
-        # needing a fractional KEY_PAD to get there.
-        box_w = w - KEY_PAD
-        box_h = ROW_HEIGHT - KEY_PAD
+        # needing a fractional KEY_PAD to get there. Skipped entirely for the
+        # last row/column: that inset exists to separate a key from the next
+        # one, and there is no next one there -- the full remaining space (the
+        # last column also being wider, having absorbed the row's leftover
+        # width from col_x's rounding) is free to use instead.
+        box_h = ROW_HEIGHT if row_idx == n_rows - 1 else ROW_HEIGHT - KEY_PAD
+        n_cols = len(key_row)
         for col_idx, key in enumerate(key_row):
-            x = x0 + col_idx * w
+            x = col_x(row_idx, col_idx, margin)
+            x_next = col_x(row_idx, col_idx + 1, margin)
+            box_w = (x_next - x) if col_idx == n_cols - 1 else (x_next - x - KEY_PAD)
             is_selected = row_idx == row and col_idx == col
             bg, fg = (SELECTED_BG, SELECTED_FG) if is_selected else (KEY_BG, KEY_FG)
 
             screen.pen = bg
             screen.rectangle(x, y, box_w, box_h)
             screen.pen = fg
-            label = LABELS.get(key, key)
+            # Uppercase only the plain character keys, not the LABELS words
+            # (delete/enter/space) -- descenders (g/j/p/q/y) sit right at the
+            # bottom edge of a key this short, but the words are too wide for
+            # their column already without also widening for all-caps.
+            label = LABELS.get(key, key.upper())
             label_w, label_h = screen.measure_text(label)
             screen.text(label, x + (box_w - label_w) // 2, y + (box_h - label_h) // 2)
 
