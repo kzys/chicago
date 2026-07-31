@@ -38,7 +38,10 @@ SPINNER = "-/|\\"
 SPINNER_FRAME_MS = 150
 
 badge.mode(HIRES)
-screen.font = rom_font.nope
+# Not the same font the keyboard grid uses (winds) -- sins' "g" glyph reads
+# better (matches chat), and "Generating..." needs it; the grid keeps its
+# own font regardless, since keyboard.draw() sets/restores it independently.
+screen.font = rom_font.sins
 
 COMPOSER_Y = keyboard.composer_y(LINE_HEIGHT)
 
@@ -125,7 +128,7 @@ def generate_image():
                 # cold start than a real failure, so this isn't counted as
                 # one of the CALL_ATTEMPTS retries -- just keep waiting, with
                 # an updated status, for the rest of the normal budget.
-                set_status("Or probably waiting cold-start...")
+                set_status("Probably just a cold start...")
                 return _request_image(REQUEST_TIMEOUT - COLD_START_TIMEOUT)
         except (OSError, ValueError, KeyError, RuntimeError) as e:
             last_error = e
