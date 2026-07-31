@@ -34,6 +34,10 @@ IMAGE_URL = "https://model-wgl4nj63.api.baseten.co/environments/production/predi
 IMAGE_REQUEST_WIDTH = 320
 IMAGE_REQUEST_HEIGHT = 256
 REQUEST_TIMEOUT = 90  # cold starts and diffusion sampling both take a while
+# A response within this long is normal sampling time; past it, a cold start
+# is the far more likely explanation, so that's the cutoff for updating the
+# status message rather than leaving "Generating..." up for the whole 90s.
+COLD_START_TIMEOUT = 30
 CALL_ATTEMPTS = 2  # this badge's wifi/TLS stack occasionally drops or mangles a request
 
 MARGIN = 4
@@ -132,33 +136,45 @@ def set_status(text):
     badge.update()
 
 
+def _request_image(timeout):
+    r = requests.post(
+        IMAGE_URL,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Api-Key " + BASETEN_IMAGE_API_KEY,
+        },
+        json={
+            "prompt": buffer,
+            "width": IMAGE_REQUEST_WIDTH,
+            "height": IMAGE_REQUEST_HEIGHT,
+        },
+        timeout=timeout,
+    )
+    if r.status_code != 200:
+        body = r.text
+        r.close()
+        raise RuntimeError("HTTP " + str(r.status_code) + ": " + body[:80])
+    data = r.json()["data"]
+    r.close()
+    # image.load() accepts raw bytes directly (undocumented, but confirmed
+    # to work) - decoding straight into memory avoids flash wear from
+    # writing every auto-refresh to /state.
+    return image.load(binascii.a2b_base64(data))
+
+
 def generate_image():
     last_error = None
     for attempt in range(CALL_ATTEMPTS):
         try:
-            r = requests.post(
-                IMAGE_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": "Api-Key " + BASETEN_IMAGE_API_KEY,
-                },
-                json={
-                    "prompt": buffer,
-                    "width": IMAGE_REQUEST_WIDTH,
-                    "height": IMAGE_REQUEST_HEIGHT,
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            if r.status_code != 200:
-                body = r.text
-                r.close()
-                raise RuntimeError("HTTP " + str(r.status_code) + ": " + body[:80])
-            data = r.json()["data"]
-            r.close()
-            # image.load() accepts raw bytes directly (undocumented, but
-            # confirmed to work) - decoding straight into memory avoids
-            # flash wear from writing every auto-refresh to /state.
-            return image.load(binascii.a2b_base64(data))
+            try:
+                return _request_image(COLD_START_TIMEOUT)
+            except OSError:
+                # No response within COLD_START_TIMEOUT is far more likely a
+                # cold start than a real failure, so this isn't counted as
+                # one of the CALL_ATTEMPTS retries -- just keep waiting, with
+                # an updated status, for the rest of the normal budget.
+                set_status("Or probably waiting cold-start...")
+                return _request_image(REQUEST_TIMEOUT - COLD_START_TIMEOUT)
         except (OSError, ValueError, KeyError, RuntimeError) as e:
             last_error = e
             if attempt < CALL_ATTEMPTS - 1:
