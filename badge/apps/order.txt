@@ -13,5 +13,4 @@ hello
 chat
 diffusion
 isitdown
-hello_world
 config
