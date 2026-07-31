@@ -81,17 +81,20 @@ def build_tools():
 
 
 MARGIN = 4
-LOG_LINE_HEIGHT = 13  # 8px glyph height + 5px line spacing
+LOG_LINE_HEIGHT = 16  # extra room below winds' nominal 12px height for descenders (g/j/p/q/y)
 
 YOU_COLOR = color.white
-BOT_COLOR = color.lime
+BOT_COLOR = color.grey
 ERROR_COLOR = color.red
 
 SPINNER = "-/|\\"
 SPINNER_FRAME_MS = 150
 
 badge.mode(HIRES)
-screen.font = rom_font.nope
+# Not the same font the keyboard grid uses (winds) -- sins' "g" glyph reads
+# better, and it's only used for header/log/composer text here; the grid
+# still sets/restores its own font in keyboard.draw() regardless.
+screen.font = rom_font.sins
 
 COMPOSER_Y = keyboard.composer_y(LOG_LINE_HEIGHT)
 HEADER_Y = MARGIN
@@ -189,13 +192,13 @@ def wrap_line(text, max_width):
     return lines
 
 
-def add_log(text, pen):
+def add_log(text, pen, align):
     global log_scroll
     for paragraph in text.split("\n"):
         if not paragraph:
             continue
         for line in wrap_line(paragraph, LOG_MAX_WIDTH):
-            log_lines.append((line, pen))
+            log_lines.append((line, pen, align))
     del log_lines[:-LOG_BUFFER_MAX]
     log_scroll = 0  # snap back to the latest message whenever new content arrives
 
@@ -286,7 +289,7 @@ def send_message():
         return
     keyboard.buffer = ""
 
-    add_log(text, YOU_COLOR)
+    add_log(text, YOU_COLOR, "right")
     chat_history.append({"role": "user", "content": text})
     del chat_history[:-MAX_HISTORY]
 
@@ -328,7 +331,7 @@ def send_message():
         reply_color = ERROR_COLOR
 
     status_text = None
-    add_log(reply, reply_color)
+    add_log(reply, reply_color, "left")
     if reply_color is BOT_COLOR:
         chat_history.append({"role": "assistant", "content": reply})
         del chat_history[:-MAX_HISTORY]
@@ -336,7 +339,9 @@ def send_message():
 
 def draw_log():
     global log_scroll
-    status_lines = [(line, color.grey) for line in wrap_line(status_text, LOG_MAX_WIDTH)] if status_text else []
+    status_lines = (
+        [(line, color.grey, "left") for line in wrap_line(status_text, LOG_MAX_WIDTH)] if status_text else []
+    )
     n_visible = LOG_VISIBLE_LINES - len(status_lines)
 
     if n_visible <= 0:
@@ -351,9 +356,14 @@ def draw_log():
     shown = real_lines + status_lines
 
     y = LOG_BOTTOM - len(shown) * LOG_LINE_HEIGHT
-    for text, pen in shown:
+    for text, pen, align in shown:
         screen.pen = pen
-        screen.text(text, MARGIN, y)
+        if align == "right":
+            text_w, _ = screen.measure_text(text)
+            x = screen.width - MARGIN - text_w
+        else:
+            x = MARGIN
+        screen.text(text, x, y)
         y += LOG_LINE_HEIGHT
 
 
