@@ -10,7 +10,7 @@ set-wifi-password:
 
 .PHONY: install-config-state
 install-config-state:
-	python3 scripts/install_state_file.py $(or $(FILE),config.json) config.json
+	python3 scripts/install_device_file.py $(or $(FILE),config.json) /state/config.json
 
 .PHONY: provision-wifi
 provision-wifi:
@@ -24,7 +24,11 @@ add-wifi-network:
 
 .PHONY: install-baseten-state
 install-baseten-state:
-	python3 scripts/install_state_file.py $(FILE) baseten.json
+	python3 scripts/install_device_file.py $(FILE) /state/baseten.json
+
+.PHONY: install-lib
+install-lib:
+	python3 scripts/install_device_file.py badge/lib/keyboard.py /lib/keyboard.py
 
 .PHONY: install-%
 install-%:

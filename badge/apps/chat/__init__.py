@@ -4,18 +4,7 @@ import time
 import wifi
 import requests
 import secrets
-
-KEY_ROWS = [
-    list("1234567890") + ["DEL"],
-    list("qwertyuiop") + ["ENTER"],
-    list("asdfghjkl") + [";", "'"],
-    list("zxcvbnm") + [",", ".", "/", "SPACE"],
-]
-
-# Every row above has exactly 11 columns (an ortholinear grid, not the usual
-# staggered QWERTY rows) so UP/DOWN keeps the cursor's column meaning
-# consistent instead of landing on a visually unrelated key.
-KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
+import keyboard
 
 # Host-provisioned only (make install-baseten-state FILE=...), no on-device
 # entry flow -- see scripts/install_state_file.py.
@@ -93,13 +82,7 @@ def build_tools():
 
 MARGIN = 4
 LOG_LINE_HEIGHT = 13  # 8px glyph height + 5px line spacing
-ROW_HEIGHT = 14
-KEY_PAD = 2
 
-KEY_BG = color.rgb(30, 40, 55)
-KEY_FG = color.white
-SELECTED_BG = color.white
-SELECTED_FG = color.black
 YOU_COLOR = color.white
 BOT_COLOR = color.lime
 ERROR_COLOR = color.red
@@ -110,8 +93,7 @@ SPINNER_FRAME_MS = 150
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-KEYBOARD_TOP = screen.height - MARGIN - len(KEY_ROWS) * ROW_HEIGHT
-COMPOSER_Y = KEYBOARD_TOP - MARGIN - LOG_LINE_HEIGHT
+COMPOSER_Y = keyboard.top_y(0) - MARGIN - LOG_LINE_HEIGHT
 HEADER_Y = MARGIN
 LOG_TOP = HEADER_Y + LOG_LINE_HEIGHT + MARGIN
 LOG_BOTTOM = COMPOSER_Y - MARGIN
@@ -121,8 +103,6 @@ LOG_VISIBLE_LINES = max(1, (LOG_BOTTOM - LOG_TOP) // LOG_LINE_HEIGHT)
 chat_history = []
 log_lines = []
 buffer = ""
-cursor_row = 1
-cursor_col = 0
 status_text = None
 log_scroll = 0  # lines scrolled back from the bottom (0 = latest)
 available_models = []  # populated once by fetch_available_models(), after wifi connects
@@ -174,51 +154,23 @@ def fetch_available_models():
         pass  # not fatal - switch_model just won't have an enum to constrain choices to
 
 
-def key_width(row_idx):
-    return (screen.width - 2 * MARGIN) // len(KEY_ROWS[row_idx])
-
-
-def row_x_offset(row_idx):
-    n = len(KEY_ROWS[row_idx])
-    w = key_width(row_idx)
-    return MARGIN + (screen.width - 2 * MARGIN - n * w) // 2
-
-
-def clamp_col():
-    global cursor_col
-    n = len(KEY_ROWS[cursor_row])
-    cursor_col = max(0, min(n - 1, cursor_col))
-
-
-def move_row(delta):
-    global cursor_row
-    cursor_row = max(0, min(len(KEY_ROWS) - 1, cursor_row + delta))
-    clamp_col()
-
-
 def scroll_log(delta):
     global log_scroll
     log_scroll = max(0, log_scroll + delta)
 
 
 def handle_up():
-    if cursor_row == 0:
+    if keyboard.row == 0:
         scroll_log(1)
     else:
-        move_row(-1)
+        keyboard.move_row(-1)
 
 
 def handle_down():
-    if cursor_row == len(KEY_ROWS) - 1:
+    if keyboard.row == len(keyboard.ROWS) - 1:
         scroll_log(-1)
     else:
-        move_row(1)
-
-
-def move_col(delta):
-    global cursor_col
-    n = len(KEY_ROWS[cursor_row])
-    cursor_col = (cursor_col + delta) % n
+        keyboard.move_row(1)
 
 
 def wrap_line(text, max_width):
@@ -385,7 +337,7 @@ def send_message():
 
 def activate_key():
     global buffer
-    key = KEY_ROWS[cursor_row][cursor_col]
+    key = keyboard.selected()
     if key == "SPACE":
         buffer += " "
     elif key == "DEL":
@@ -430,32 +382,13 @@ def draw_composer():
     screen.text(buffer + cursor_char, MARGIN, COMPOSER_Y)
 
 
-def draw_keyboard():
-    for row_idx, row in enumerate(KEY_ROWS):
-        w = key_width(row_idx)
-        x0 = row_x_offset(row_idx)
-        y = KEYBOARD_TOP + row_idx * ROW_HEIGHT
-        for col_idx, key in enumerate(row):
-            x = x0 + col_idx * w
-            selected = row_idx == cursor_row and col_idx == cursor_col
-
-            bg, fg = (SELECTED_BG, SELECTED_FG) if selected else (KEY_BG, KEY_FG)
-
-            screen.pen = bg
-            screen.rectangle(x + KEY_PAD, y + KEY_PAD, w - KEY_PAD * 2, ROW_HEIGHT - KEY_PAD * 2)
-            screen.pen = fg
-            label = KEY_LABELS.get(key, key)
-            label_w, label_h = screen.measure_text(label)
-            screen.text(label, x + (w - label_w) // 2, y + (ROW_HEIGHT - label_h) // 2)
-
-
 def render():
     screen.pen = color.black
     screen.clear()
     draw_header()
     draw_log()
     draw_composer()
-    draw_keyboard()
+    keyboard.draw(0)
 
 
 def update():
@@ -480,9 +413,9 @@ def update():
     if badge.pressed(BUTTON_DOWN):
         handle_down()
     if badge.pressed(BUTTON_A):
-        move_col(-1)
+        keyboard.move_col(-1)
     if badge.pressed(BUTTON_C):
-        move_col(1)
+        keyboard.move_col(1)
     if badge.pressed(BUTTON_B):
         activate_key()
 

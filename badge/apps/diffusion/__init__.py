@@ -4,21 +4,10 @@ import json
 import wifi
 import requests
 import secrets
-
-KEY_ROWS = [
-    list("1234567890") + ["DEL"],
-    list("qwertyuiop") + ["ENTER"],
-    list("asdfghjkl") + [";", "'"],
-    list("zxcvbnm") + [",", ".", "/", "SPACE"],
-]
-
-# Every row above has exactly 11 columns (an ortholinear grid, not the usual
-# staggered QWERTY rows) so UP/DOWN keeps the cursor's column meaning
-# consistent instead of landing on a visually unrelated key.
-KEY_LABELS = {"SPACE": "SPC", "ENTER": "ENT"}
+import keyboard
 
 # Host-provisioned only (make install-baseten-state FILE=...), no on-device
-# entry flow -- see scripts/install_state_file.py.
+# entry flow -- see scripts/install_device_file.py.
 try:
     with open("/state/baseten.json") as _f:
         BASETEN_IMAGE_API_KEY = json.load(_f).get("BASETEN_IMAGE_API_KEY")
@@ -42,13 +31,7 @@ CALL_ATTEMPTS = 2  # this badge's wifi/TLS stack occasionally drops or mangles a
 
 MARGIN = 4
 LINE_HEIGHT = 13
-ROW_HEIGHT = 14
-KEY_PAD = 2
 
-KEY_BG = color.rgb(30, 40, 55)
-KEY_FG = color.white
-SELECTED_BG = color.white
-SELECTED_FG = color.black
 ERROR_COLOR = color.red
 
 SPINNER = "-/|\\"
@@ -57,47 +40,16 @@ SPINNER_FRAME_MS = 150
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-KEYBOARD_TOP = screen.height - MARGIN - len(KEY_ROWS) * ROW_HEIGHT
-COMPOSER_Y = KEYBOARD_TOP - MARGIN - LINE_HEIGHT
+COMPOSER_Y = keyboard.top_y(0) - MARGIN - LINE_HEIGHT
 
 AUTO_INTERVAL_MS = 30000  # regenerate on this cadence, reset by any submit
 
 buffer = "pelican riding a bicycle in Chicago"
-cursor_row = 1
-cursor_col = 0
 status_text = None
 error_text = None
 sprite = None
 next_auto_ticks = None  # None means "due immediately" - set once wifi connects
 editing = False  # keyboard/composer only shown while editing the prompt
-
-
-def key_width(row_idx):
-    return (screen.width - 2 * MARGIN) // len(KEY_ROWS[row_idx])
-
-
-def row_x_offset(row_idx):
-    n = len(KEY_ROWS[row_idx])
-    w = key_width(row_idx)
-    return MARGIN + (screen.width - 2 * MARGIN - n * w) // 2
-
-
-def clamp_col():
-    global cursor_col
-    n = len(KEY_ROWS[cursor_row])
-    cursor_col = max(0, min(n - 1, cursor_col))
-
-
-def move_row(delta):
-    global cursor_row
-    cursor_row = max(0, min(len(KEY_ROWS) - 1, cursor_row + delta))
-    clamp_col()
-
-
-def move_col(delta):
-    global cursor_col
-    n = len(KEY_ROWS[cursor_row])
-    cursor_col = (cursor_col + delta) % n
 
 
 def wrap_line(text, max_width):
@@ -199,7 +151,7 @@ def submit_prompt():
 
 def activate_key():
     global buffer, editing
-    key = KEY_ROWS[cursor_row][cursor_col]
+    key = keyboard.selected()
     if key == "SPACE":
         buffer += " "
     elif key == "DEL":
@@ -226,30 +178,11 @@ def draw_status_overlay():
 def draw_composer():
     # Solid backing bar, same as the keyboard's key backgrounds, so the
     # prompt text stays legible over whatever's underneath in the image.
-    screen.pen = KEY_BG
+    screen.pen = keyboard.KEY_BG
     screen.rectangle(0, COMPOSER_Y - 2, screen.width, LINE_HEIGHT + 4)
     screen.pen = color.white
     cursor_char = "_" if (badge.ticks // 400) % 2 == 0 else " "
     screen.text(buffer + cursor_char, MARGIN, COMPOSER_Y)
-
-
-def draw_keyboard():
-    for row_idx, row in enumerate(KEY_ROWS):
-        w = key_width(row_idx)
-        x0 = row_x_offset(row_idx)
-        y = KEYBOARD_TOP + row_idx * ROW_HEIGHT
-        for col_idx, key in enumerate(row):
-            x = x0 + col_idx * w
-            selected = row_idx == cursor_row and col_idx == cursor_col
-
-            bg, fg = (SELECTED_BG, SELECTED_FG) if selected else (KEY_BG, KEY_FG)
-
-            screen.pen = bg
-            screen.rectangle(x + KEY_PAD, y + KEY_PAD, w - KEY_PAD * 2, ROW_HEIGHT - KEY_PAD * 2)
-            screen.pen = fg
-            label = KEY_LABELS.get(key, key)
-            label_w, label_h = screen.measure_text(label)
-            screen.text(label, x + (w - label_w) // 2, y + (ROW_HEIGHT - label_h) // 2)
 
 
 def render():
@@ -259,7 +192,7 @@ def render():
         blit_cover(sprite, 0, 0, screen.width, screen.height)
     if editing:
         draw_composer()
-        draw_keyboard()
+        keyboard.draw(0)
     else:
         draw_status_overlay()
 
@@ -279,13 +212,13 @@ def update():
 
     if editing:
         if badge.pressed(BUTTON_UP):
-            move_row(-1)
+            keyboard.move_row(-1)
         if badge.pressed(BUTTON_DOWN):
-            move_row(1)
+            keyboard.move_row(1)
         if badge.pressed(BUTTON_A):
-            move_col(-1)
+            keyboard.move_col(-1)
         if badge.pressed(BUTTON_C):
-            move_col(1)
+            keyboard.move_col(1)
         if badge.pressed(BUTTON_B):
             activate_key()
     elif badge.pressed(BUTTON_B):
