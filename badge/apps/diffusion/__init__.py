@@ -40,11 +40,11 @@ SPINNER_FRAME_MS = 150
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-COMPOSER_Y = keyboard.top_y(0) - MARGIN - LINE_HEIGHT
+COMPOSER_Y = keyboard.composer_y(LINE_HEIGHT)
 
 AUTO_INTERVAL_MS = 30000  # regenerate on this cadence, reset by any submit
 
-buffer = "pelican riding a bicycle in Chicago"
+keyboard.buffer = "pelican riding a bicycle in Chicago"
 status_text = None
 error_text = None
 sprite = None
@@ -96,7 +96,7 @@ def _request_image(timeout):
             "Authorization": "Api-Key " + BASETEN_IMAGE_API_KEY,
         },
         json={
-            "prompt": buffer,
+            "prompt": keyboard.buffer,
             "width": IMAGE_REQUEST_WIDTH,
             "height": IMAGE_REQUEST_HEIGHT,
         },
@@ -136,7 +136,7 @@ def generate_image():
 
 def submit_prompt():
     global sprite, error_text, status_text, next_auto_ticks
-    prompt = buffer.strip()
+    prompt = keyboard.buffer.strip()
     if not prompt:
         return
     set_status("Generating...")
@@ -147,20 +147,6 @@ def submit_prompt():
         error_text = str(e)
     status_text = None
     next_auto_ticks = badge.ticks + AUTO_INTERVAL_MS
-
-
-def activate_key():
-    global buffer, editing
-    key = keyboard.selected()
-    if key == "SPACE":
-        buffer += " "
-    elif key == "DEL":
-        buffer = buffer[:-1]
-    elif key == "ENTER":
-        editing = False
-        submit_prompt()
-    else:
-        buffer += key
 
 
 def draw_status_overlay():
@@ -175,24 +161,13 @@ def draw_status_overlay():
         screen.text(status_text, MARGIN, screen.height - LINE_HEIGHT - MARGIN)
 
 
-def draw_composer():
-    # Solid backing bar, same as the keyboard's key backgrounds, so the
-    # prompt text stays legible over whatever's underneath in the image.
-    screen.pen = keyboard.KEY_BG
-    screen.rectangle(0, COMPOSER_Y - 2, screen.width, LINE_HEIGHT + 4)
-    screen.pen = color.white
-    cursor_char = "_" if (badge.ticks // 400) % 2 == 0 else " "
-    screen.text(buffer + cursor_char, MARGIN, COMPOSER_Y)
-
-
 def render():
     screen.pen = color.black
     screen.clear()
     if sprite:
         blit_cover(sprite, 0, 0, screen.width, screen.height)
     if editing:
-        draw_composer()
-        keyboard.draw(0)
+        keyboard.draw(MARGIN, LINE_HEIGHT)
     else:
         draw_status_overlay()
 
@@ -219,8 +194,9 @@ def update():
             keyboard.move_col(-1)
         if badge.pressed(BUTTON_C):
             keyboard.move_col(1)
-        if badge.pressed(BUTTON_B):
-            activate_key()
+        if badge.pressed(BUTTON_B) and keyboard.type_key() == "enter":
+            editing = False
+            submit_prompt()
     elif badge.pressed(BUTTON_B):
         editing = True
 

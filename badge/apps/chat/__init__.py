@@ -93,7 +93,7 @@ SPINNER_FRAME_MS = 150
 badge.mode(HIRES)
 screen.font = rom_font.nope
 
-COMPOSER_Y = keyboard.top_y(0) - MARGIN - LOG_LINE_HEIGHT
+COMPOSER_Y = keyboard.composer_y(LOG_LINE_HEIGHT)
 HEADER_Y = MARGIN
 LOG_TOP = HEADER_Y + LOG_LINE_HEIGHT + MARGIN
 LOG_BOTTOM = COMPOSER_Y - MARGIN
@@ -102,7 +102,6 @@ LOG_VISIBLE_LINES = max(1, (LOG_BOTTOM - LOG_TOP) // LOG_LINE_HEIGHT)
 
 chat_history = []
 log_lines = []
-buffer = ""
 status_text = None
 log_scroll = 0  # lines scrolled back from the bottom (0 = latest)
 available_models = []  # populated once by fetch_available_models(), after wifi connects
@@ -281,11 +280,11 @@ def run_tool_call(call):
 
 
 def send_message():
-    global buffer, status_text
-    text = buffer.strip()
+    global status_text
+    text = keyboard.buffer.strip()
     if not text:
         return
-    buffer = ""
+    keyboard.buffer = ""
 
     add_log(text, YOU_COLOR)
     chat_history.append({"role": "user", "content": text})
@@ -335,19 +334,6 @@ def send_message():
         del chat_history[:-MAX_HISTORY]
 
 
-def activate_key():
-    global buffer
-    key = keyboard.selected()
-    if key == "SPACE":
-        buffer += " "
-    elif key == "DEL":
-        buffer = buffer[:-1]
-    elif key == "ENTER":
-        send_message()
-    else:
-        buffer += key
-
-
 def draw_log():
     global log_scroll
     status_lines = [(line, color.grey) for line in wrap_line(status_text, LOG_MAX_WIDTH)] if status_text else []
@@ -376,19 +362,12 @@ def draw_header():
     screen.text(MODEL, MARGIN, HEADER_Y)
 
 
-def draw_composer():
-    screen.pen = color.white
-    cursor_char = "_" if (badge.ticks // 400) % 2 == 0 else " "
-    screen.text(buffer + cursor_char, MARGIN, COMPOSER_Y)
-
-
 def render():
     screen.pen = color.black
     screen.clear()
     draw_header()
     draw_log()
-    draw_composer()
-    keyboard.draw(0)
+    keyboard.draw(MARGIN, LOG_LINE_HEIGHT)
 
 
 def update():
@@ -416,8 +395,8 @@ def update():
         keyboard.move_col(-1)
     if badge.pressed(BUTTON_C):
         keyboard.move_col(1)
-    if badge.pressed(BUTTON_B):
-        activate_key()
+    if badge.pressed(BUTTON_B) and keyboard.type_key() == "enter":
+        send_message()
 
     render()
 
