@@ -1,6 +1,6 @@
 # chicago
 
-Apps for a Pimoroni Tufty 2350 badge running Badgeware firmware (MicroPython). Built at Baseten's Chicago offsite.
+Apps for a [Pimoroni Tufty 2350](https://shop.pimoroni.com/en-us/products/tufty-2350) badge running [Badgeware](https://github.com/pimoroni/tufty2350) firmware (MicroPython). Built at [Baseten](https://www.baseten.co/)'s Chicago offsite.
 
 Each app lives in `badge/apps/<name>/` and is installed onto the badge over USB — there's no emulator, so "running" an app means putting it on real hardware.
 
